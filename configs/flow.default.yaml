@@ -1,0 +1,21 @@
+# Required flow, steps 4-5 (docs/FLOW.md): FastH3 Omni int8, card graph, one continuous 30 s shot at native 1280x720.
+# Measured on our single 24 GB GPU: generate and decode 604-637 s (docs/PERFORMANCE.md section 5). n = 1 per run.
+# Copy this file, then set: prompt_file (your own card-form prompt), voice_ref and image_refs (your own assets),
+# models.identity_lora (a LoRA trained on data you have written consent to use; empty = no identity LoRA).
+name: flow_run
+prompt_file: prompts/podcast_host.txt   # example prompt; replace with your own (step 2)
+seconds: 29.96          # 719 frames at 24 fps
+width: 1280
+height: 720
+seed: 7329
+steps: 8
+sampler: euler
+guidance: 1.0           # BasicGuider
+identity_strength: 0.8  # applied only when models.identity_lora is set
+realism: 0.3
+attention: vsa
+vsa_keep_percent: 10
+ffn_chunk_tokens: 16384
+voice_ref: ""           # step 3: a voice reference you own, uploaded to ComfyUI input/
+image_refs: []          # step 3: FLUX look image (~720p) and an empty set plate with no person, uploaded to ComfyUI input/
+upscale_to: [1920, 1080]
