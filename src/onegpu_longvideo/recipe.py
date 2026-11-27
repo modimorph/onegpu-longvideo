@@ -13,7 +13,7 @@ class Models:
     text_encoder: str = "qwen3vl_32b_minimax_h3-Q4_K_M.gguf"
     text_encoder_loader: str = "CLIPLoaderGGUF"  # or CLIPLoader for safetensors
     # int8 decoder (ComfyUI >= 0.36 fused int8 kernels: int8 GEMM with folded norm/act/skip, int8 attention).
-    # Needs the server flag in configs/comfyui_flags.txt. fp16 file = "minimax_h3_video_vae_fp16.safetensors".
+    # Loads on stock ComfyUI >= 0.36; configs/comfyui_flags.txt is a separate, optional speed flag. fp16 file = "minimax_h3_video_vae_fp16.safetensors".
     video_vae: str = "minimax_h3_video_vae_int8_convrot.safetensors"
     audio_vae: str = "minimax_h3_audio_vae_fp32.safetensors"
     realism_lora: str = "h3-realism-people-t2v-i2v-r2v.safetensors"
