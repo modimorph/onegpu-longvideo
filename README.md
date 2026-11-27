@@ -15,6 +15,12 @@ Watch the samples: **https://modimorph.github.io/onegpu-longvideo/**
 All people in the samples are invented. Our runs used one 24 GB consumer GPU (an RTX 4090) on Windows with ComfyUI 0.41.
 These are our observations, not requirements. Numbers are n = 1 unless stated. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 
+## Required flow
+
+Every video follows the same 12 steps: script, prompt, assets, recipe, render, best of several seeds, first QA pass, upscale, edit, voice, finish, final QA.
+Each step has a pass gate. Start from `configs/flow.default.yaml`, tick [docs/FLOW-CHECKLIST.md](docs/FLOW-CHECKLIST.md) per video, and run `olv flow-check <run folder>` at the end.
+Steps the repo cannot run yet are marked manual. Full flow: **[docs/FLOW.md](docs/FLOW.md)**.
+
 ## How it works
 
 ```mermaid
@@ -41,7 +47,7 @@ flowchart LR
 ```bash
 git clone https://github.com/modimorph/onegpu-longvideo && cd onegpu-longvideo
 pip install -e ".[dev]"          # pure-Python parts; tests run on CPU
-pytest -q                        # 40 tests, no GPU
+pytest -q                        # 49 tests, no GPU
 
 olv graph configs/talking_head_30s.yaml --out graph.json   # build the ComfyUI API graph (no GPU)
 olv lint configs/prompts/podcast_host.txt                  # check a prompt
@@ -73,6 +79,7 @@ A recipe is one YAML file; every field maps to `onegpu_longvideo.recipe.Recipe`.
 | `configs/tutor_30s.yaml` | tutor sample settings |
 | `configs/documentary.yaml` | potter sample settings (720p, no speech) |
 | `configs/cinematic.yaml` | an invented action street scene, sound effects only (not one of the published samples) |
+| `configs/flow.default.yaml` | the required flow (steps 4-5): 1280x720, 719 frames, seed 7329 |
 | `configs/voice_post.example.yaml` | optional voice conversion with the WER guard |
 | `configs/prompts/*.txt` | the exact prompts; `*.lines.txt` are the intended lines for WER |
 
@@ -93,6 +100,7 @@ Prompt rules that mattered in our runs: continuous speech with no planned silenc
 | `qa.stage2` | vision-language model check on flagged windows (any OpenAI-compatible endpoint) |
 | `voice` | voice post: sample-exact length, envelope lag per window, WER guard |
 | `camera` | camera-path estimate and plan check |
+| `flow` | `olv flow-check`: validate a run folder against the flow gates |
 | `timing` | stage timing log, GPU memory sampler, torch profiler helper |
 
 ## What we tried and what happened
