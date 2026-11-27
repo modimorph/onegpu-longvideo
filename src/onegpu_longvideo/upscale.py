@@ -3,6 +3,16 @@
 ffmpeg decode (rgb24 pipe) -> model (fp16, batches) -> GPU bicubic resize to the target size -> ffmpeg encode,
 with the source audio stream copied untouched. Three threads overlap, so RAM stays small: no full-clip tensor.
 Needs: torch with CUDA, spandrel, ffmpeg on PATH. Encoder: h264_nvenc (default) or libx264 (--x264).
+
+Optional levers (each measured on its own; see onegpu-native/iterations/io-details.md). Defaults keep the
+original path. Pass `opts` or set ONEGPU_UPSCALE_OPTS="cudnn_bench,channels_last,..." to switch them on:
+  cudnn_bench   torch.backends.cudnn.benchmark = True (autotuned conv algorithms; not bit-exact)
+  channels_last model and input in NHWC memory format (tensor-core friendly convs)
+  overlap       pinned host buffers + a copy stream: D2H of batch k runs while batch k+1 computes; no
+                device-wide synchronize per batch
+  interp_half   bicubic resize in fp16 instead of fp32 (not bit-exact)
+  hwdec         ffmpeg decode with -hwaccel cuda (NVDEC)
+  triton_post   fused Triton post-process (old opt-in, also ONEGPU_TRITON_FRAMEIO=1)
 """
 from __future__ import annotations
 
@@ -12,6 +22,8 @@ import queue
 import subprocess
 import threading
 import time
+
+OPTS = ("cudnn_bench", "channels_last", "overlap", "interp_half", "hwdec", "triton_post")
 
 
 def probe(path: str) -> dict:
@@ -26,19 +38,42 @@ def encoder_args(x264: bool, quality: int) -> list[str]:
     return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", str(quality), "-b:v", "0"]
 
 
+def resolve_opts(opts: dict | None) -> dict:
+    env = {k.strip() for k in os.environ.get("ONEGPU_UPSCALE_OPTS", "").split(",") if k.strip()}
+    o = {k: (k in env) for k in OPTS}
+    if os.environ.get("ONEGPU_TRITON_FRAMEIO") == "1":
+        o["triton_post"] = True
+    o.update(opts or {})
+    unknown = set(o) - set(OPTS)
+    if unknown:
+        raise ValueError(f"unknown upscale opts: {sorted(unknown)}")
+    return o
+
+
 def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch: int = 8, quality: int = 18,
-            x264: bool = False, comment: str = "AI-generated") -> dict:
+            x264: bool = False, comment: str = "AI-generated", opts: dict | None = None, model=None, tap=None) -> dict:
+    """tap: optional callable(np.ndarray uint8 NHWC) that sees every output batch (bench correctness gate)."""
     import numpy as np
     import torch
     import torch.nn.functional as F
-    from spandrel import ModelLoader
 
+    o = resolve_opts(opts)
     t0 = time.perf_counter()
     pr = probe(inp)
     w, h, fps = pr["width"], pr["height"], pr["r_frame_rate"]
-    model = ModelLoader().load_from_file(model_path).model.eval().cuda().half()
+    if o["cudnn_bench"]:
+        torch.backends.cudnn.benchmark = True
+    if model is None:
+        from spandrel import ModelLoader
+        model = ModelLoader().load_from_file(model_path).model.eval().cuda().half()
+    if o["channels_last"]:
+        model = model.to(memory_format=torch.channels_last)
+    post = None
+    if o["triton_post"]:
+        from .kernels.frame_io_triton import f32_nchw_to_u8_nhwc as post
     t_load = time.perf_counter() - t0
-    dec = subprocess.Popen(["ffmpeg", "-v", "error", "-i", inp, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+    dec_cmd = ["ffmpeg", "-v", "error"] + (["-hwaccel", "cuda"] if o["hwdec"] else []) + ["-i", inp, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    dec = subprocess.Popen(dec_cmd, stdout=subprocess.PIPE)
     enc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", fps, "-i", "-",
                             "-i", inp, "-map", "0:v", "-map", "1:a?", *encoder_args(x264, quality), "-pix_fmt", "yuv420p", "-c:a", "copy",
                             "-map_metadata", "-1", "-metadata", f"comment={comment}", "-movflags", "+faststart", out], stdin=subprocess.PIPE)
@@ -65,15 +100,28 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
             x = qout.get()
             if x is None:
                 break
-            enc.stdin.write(x.tobytes())
+            if isinstance(x, tuple):  # (event, pinned tensor, n, slot release): wait for its async D2H copy
+                ev, pin, k, release = x
+                ev.synchronize()
+                a = pin[:k].numpy()
+                if tap is not None:
+                    tap(a)
+                enc.stdin.write(a.tobytes())
+                release.put(pin)
+            else:
+                if tap is not None:
+                    tap(x)
+                enc.stdin.write(x.tobytes())
         enc.stdin.close()
 
     threading.Thread(target=reader, daemon=True).start()
     wt = threading.Thread(target=writer)
     wt.start()
-    post = None
-    if os.environ.get("ONEGPU_TRITON_FRAMEIO") == "1":  # opt-in until the end-to-end A/B passes
-        from .kernels.frame_io_triton import f32_nchw_to_u8_nhwc as post
+    copy_stream = torch.cuda.Stream() if o["overlap"] else None
+    pins: queue.Queue = queue.Queue()
+    if o["overlap"]:
+        for _ in range(3):  # 3 pinned slots: compute k+1 and k+2 while the writer drains k
+            pins.put(torch.empty((batch, height, width, 3), dtype=torch.uint8, pin_memory=True))
     t1 = time.perf_counter()
     gpu = 0.0
     n = 0
@@ -83,24 +131,44 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
             if x is None:
                 break
             g0 = time.perf_counter()
-            t = torch.from_numpy(x).cuda().permute(0, 3, 1, 2).half().div_(255)
-            y = model(t)
-            y = F.interpolate(y.float(), size=(height, width), mode="bicubic", antialias=True)
-            if post is None:
-                y = y.clamp_(0, 1)
-            if post is not None:  # fused Triton: clamp*255, rint, byte, NHWC in one pass (bit-exact)
-                o = post(y.contiguous()).cpu().numpy()
+            xt = torch.from_numpy(x)
+            if o["overlap"]:
+                xt = xt.pin_memory().cuda(non_blocking=True)
             else:
-                o = y.mul_(255).round_().byte().permute(0, 2, 3, 1).contiguous().cpu().numpy()
-            torch.cuda.synchronize()
-            gpu += time.perf_counter() - g0
-            qout.put(o)
+                xt = xt.cuda()
+            t = xt.permute(0, 3, 1, 2).half().div_(255)
+            if o["channels_last"]:
+                t = t.contiguous(memory_format=torch.channels_last)
+            y = model(t)
+            if o["interp_half"]:
+                y = F.interpolate(y, size=(height, width), mode="bicubic", antialias=True).float()
+            else:
+                y = F.interpolate(y.float(), size=(height, width), mode="bicubic", antialias=True)
+            if post is not None:  # fused Triton: clamp*255, rint, byte, NHWC in one pass (bit-exact)
+                ob = post(y.contiguous())
+            else:
+                ob = y.clamp_(0, 1).mul_(255).round_().byte().permute(0, 2, 3, 1).contiguous()
+            if o["overlap"]:
+                pin = pins.get()
+                done = torch.cuda.current_stream().record_event()
+                with torch.cuda.stream(copy_stream):
+                    copy_stream.wait_event(done)
+                    pin[: len(x)].copy_(ob, non_blocking=True)
+                    ob.record_stream(copy_stream)
+                    ev = copy_stream.record_event()
+                gpu += time.perf_counter() - g0
+                qout.put((ev, pin, len(x), pins))
+            else:
+                a = ob.cpu().numpy()
+                torch.cuda.synchronize()
+                gpu += time.perf_counter() - g0
+                qout.put(a)
             n += len(x)
     qout.put(None)
     wt.join()
     enc.wait()
     dec.wait()
     t2 = time.perf_counter()
-    return {"in": inp, "out": out, "size": [width, height], "frames": n, "load_s": round(t_load, 1), "pipeline_s": round(t2 - t1, 1),
-            "gpu_s": round(gpu, 1), "fps": round(n / max(t2 - t1, 1e-9), 2), "encoder": "x264" if x264 else "nvenc",
-            "peak_vram_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2)}
+    return {"in": inp, "out": out, "size": [width, height], "frames": n, "load_s": round(t_load, 1), "pipeline_s": round(t2 - t1, 2),
+            "gpu_s": round(gpu, 2), "fps": round(n / max(t2 - t1, 1e-9), 2), "encoder": "x264" if x264 else "nvenc",
+            "opts": sorted(k for k, v in o.items() if v), "peak_vram_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2)}
