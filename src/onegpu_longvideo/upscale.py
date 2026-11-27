@@ -7,6 +7,7 @@ Needs: torch with CUDA, spandrel, ffmpeg on PATH. Encoder: h264_nvenc (default) 
 from __future__ import annotations
 
 import json
+import os
 import queue
 import subprocess
 import threading
@@ -70,6 +71,9 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
     threading.Thread(target=reader, daemon=True).start()
     wt = threading.Thread(target=writer)
     wt.start()
+    post = None
+    if os.environ.get("ONEGPU_TRITON_FRAMEIO") == "1":  # opt-in until the end-to-end A/B passes
+        from .kernels.frame_io_triton import f32_nchw_to_u8_nhwc as post
     t1 = time.perf_counter()
     gpu = 0.0
     n = 0
@@ -81,8 +85,13 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
             g0 = time.perf_counter()
             t = torch.from_numpy(x).cuda().permute(0, 3, 1, 2).half().div_(255)
             y = model(t)
-            y = F.interpolate(y.float(), size=(height, width), mode="bicubic", antialias=True).clamp_(0, 1)
-            o = y.mul_(255).round_().byte().permute(0, 2, 3, 1).contiguous().cpu().numpy()
+            y = F.interpolate(y.float(), size=(height, width), mode="bicubic", antialias=True)
+            if post is None:
+                y = y.clamp_(0, 1)
+            if post is not None:  # fused Triton: clamp*255, rint, byte, NHWC in one pass (bit-exact)
+                o = post(y.contiguous()).cpu().numpy()
+            else:
+                o = y.mul_(255).round_().byte().permute(0, 2, 3, 1).contiguous().cpu().numpy()
             torch.cuda.synchronize()
             gpu += time.perf_counter() - g0
             qout.put(o)
