@@ -1,1 +1,1 @@
---fast fp16_accumulation
+--fast fp16_accumulation --reserve-vram 1.5
