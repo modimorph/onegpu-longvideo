@@ -5,7 +5,7 @@
 - [x] Custom ComfyUI nodes `comfyui_nodes/onegpu_nodes.py` (chunked FFN, Sage on video rows, temporal RoPE patch).
 - [x] Recipes and exact prompts for the three samples plus one cinematic example.
 - [x] Docs: EXPERIMENTS, PERFORMANCE, QA, LIMITATIONS.
-- [x] 40 CPU unit tests, ruff, CI on Python 3.10 and 3.12.
+- [x] 49 CPU unit tests, ruff, CI on Python 3.10 and 3.12.
 - [x] Three sample videos in `media/` and a GitHub Pages page.
 - [x] Secret, path and forbidden-term scans before the first push.
 

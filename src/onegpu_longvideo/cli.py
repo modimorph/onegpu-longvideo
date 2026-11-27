@@ -1,4 +1,4 @@
-"""Command line: olv graph | render | upscale | lint | wer | camera."""
+"""Command line: olv graph | render | upscale | lint | wer | camera | flow-check."""
 from __future__ import annotations
 
 import argparse
@@ -87,6 +87,15 @@ def cmd_camera(a):
     print(json.dumps(analyze(a.video, plan=a.plan)))
 
 
+def cmd_flow_check(a):
+    from . import flow
+
+    rows = flow.check(a.run_dir)
+    for r in rows:
+        print(f"{'PASS' if r['pass'] else 'FAIL'}  step {r['step']:>2}  {r['gate']}  {r['note']}")
+    sys.exit(0 if flow.passed(rows) else 1)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="olv", description="Long one-shot audio-video generation on one GPU")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -107,6 +116,8 @@ def main(argv=None):
     s.set_defaults(fn=cmd_wer)
     s = sub.add_parser("camera", help="estimate the camera move and compare with the plan")
     s.add_argument("video"); s.add_argument("--plan", choices=["push", "pull", "arc", "slide", "locked"]); s.set_defaults(fn=cmd_camera)
+    s = sub.add_parser("flow-check", help="validate a run folder against the required-flow gates (docs/FLOW.md)")
+    s.add_argument("run_dir"); s.set_defaults(fn=cmd_flow_check)
     a = ap.parse_args(argv)
     a.fn(a)
 
