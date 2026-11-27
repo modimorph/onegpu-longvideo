@@ -190,8 +190,15 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
     copy_stream = torch.cuda.Stream() if o["overlap"] else None
     pins: queue.Queue = queue.Queue()
     if o["overlap"]:  # allocated before the workers start, so a failed allocation leaves no thread blocked
-        for _ in range(3):  # 3 pinned slots: compute k+1 and k+2 while the writer drains k
-            pins.put(torch.empty((batch, height, width, 3), dtype=torch.uint8, pin_memory=True))
+        try:
+            for _ in range(3):  # 3 pinned slots: compute k+1 and k+2 while the writer drains k
+                pins.put(torch.empty((batch, height, width, 3), dtype=torch.uint8, pin_memory=True))
+        except Exception:  # stop and reap both ffmpeg children before re-raising
+            for p_ in (dec, enc):
+                if p_.poll() is None:
+                    p_.kill()
+                p_.wait()
+            raise
     threading.Thread(target=reader, daemon=True).start()
     wt = threading.Thread(target=writer)
     wt.start()
@@ -249,6 +256,8 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
         torch.backends.cudnn.benchmark = cudnn_prev
     if werr:
         raise RuntimeError(f"upscale writer failed: {werr[0]!r}") from werr[0]
+    if enc.returncode:
+        raise RuntimeError(f"upscale encoder exited with code {enc.returncode}: output {out} is not valid")
     t2 = time.perf_counter()
     return {"in": inp, "out": out, "size": [width, height], "frames": n, "load_s": round(t_load, 1), "pipeline_s": round(t2 - t1, 2),
             "gpu_s": round(gpu, 2), "fps": round(n / max(t2 - t1, 1e-9), 2), "encoder": "x264" if x264 else "nvenc",

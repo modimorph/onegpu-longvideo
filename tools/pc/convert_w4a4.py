@@ -66,22 +66,24 @@ def main():
             del w, qd, prm
         bench = None
         if a.bench:
-            bench = bench_one(f, qmods, dev)
+            bench = bench_one(f, qmods, dev, linear_dtype=a.linear_dtype)
+    meta = {k: v for k, v in meta.items() if k != "_quantization_metadata"}  # legacy map would override the new per-module configs
     meta = dict(meta, w4a4_source=a.src.replace("\\", "/").rsplit("/", 1)[-1], w4a4_tool="onegpu-longvideo tools/pc/convert_w4a4.py")
     save_file(out, a.dst, metadata=meta)
     print(json.dumps({"modules": len(qmods), "seconds": round(time.perf_counter() - t0, 1), "rel_err_samples": errs,
                       "rel_err_max": max((e for _, e in errs), default=None), "bench": bench}))
 
 
-def bench_one(f, qmods, dev, M=32768):
+def bench_one(f, qmods, dev, M=32768, linear_dtype="int4"):
     """One real-shape linear: int8 convrot (reference) vs W4A4, CUDA events, median of 20 after 3 warm-ups."""
-    m = next(x for x in qmods if x.endswith("ffn.fc1") or ".mlp." in x or "fc1" in x) if any("fc1" in x for x in qmods) else qmods[0]
+    shp = {x: f.get_slice(x + ".weight").get_shape() for x in qmods}
+    m = max(qmods, key=lambda x: shp[x][0] * shp[x][1])  # largest linear
     q, s = f.get_tensor(m + ".weight"), f.get_tensor(m + ".weight_scale")
     gs = int(cfg_of(f, m + ".comfy_quant").get("convrot_groupsize", 256))
     p8 = TensorWiseINT8Layout.Params(scale=s.to(dev), orig_dtype=torch.bfloat16, orig_shape=tuple(q.shape), convrot=True, convrot_groupsize=gs)
     w8 = QuantizedTensor(q.to(dev), "TensorWiseINT8Layout", p8)
     w = TensorWiseINT8Layout.dequantize(q.to(dev), p8)
-    qd, p4 = TensorCoreConvRotW4A4Layout.quantize(w, convrot_groupsize=gs)
+    qd, p4 = TensorCoreConvRotW4A4Layout.quantize(w, convrot_groupsize=gs, linear_dtype=linear_dtype)
     w4 = QuantizedTensor(qd, "TensorCoreConvRotW4A4Layout", p4)
     g = torch.Generator(device=dev).manual_seed(7329)
     x = torch.randn(M, q.shape[1], device=dev, dtype=torch.bfloat16, generator=g)
@@ -94,7 +96,7 @@ def bench_one(f, qmods, dev, M=32768):
         for _ in range(20):
             e0, e1 = torch.cuda.Event(True), torch.cuda.Event(True)
             e0.record(); fn(); e1.record(); torch.cuda.synchronize(); ts.append(e0.elapsed_time(e1))
-        ts.sort(); return [round(ts[10], 3), round(ts[4], 3), round(ts[16], 3)]
+        ts.sort(); return [round((ts[9] + ts[10]) / 2, 3), round(ts[4], 3), round(ts[15], 3)]  # median, p20, p80 of 20
 
     y8 = torch.nn.functional.linear(x, w8); y4 = torch.nn.functional.linear(x, w4)
     rel = lambda y: round(((y.float() - ref.float()).norm() / ref.float().norm()).item(), 5)
