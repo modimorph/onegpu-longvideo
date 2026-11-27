@@ -34,11 +34,13 @@ def main():
     ap.add_argument("--linear-dtype", default="int4", choices=["int4", "int8"])
     ap.add_argument("--check", type=int, default=16)
     ap.add_argument("--bench", action="store_true")
+    ap.add_argument("--device", default="cuda", help="cuda, or cpu (kitchen eager kernels) to convert while the GPU is busy")
+    ap.add_argument("--limit", type=int, default=0, help="convert only the first N modules (smoke test; no file written)")
     a = ap.parse_args()
     import os
     if os.path.abspath(a.src) == os.path.abspath(a.dst):
         raise SystemExit("DST must differ from SRC")
-    dev = "cuda"
+    dev = a.device
     out, errs, t0 = {}, [], time.perf_counter()
     with safe_open(a.src, "pt", device="cpu") as f:
         meta = f.metadata() or {}
@@ -53,7 +55,7 @@ def main():
             if m in qset and k.split(".")[-1] in ("weight", "weight_scale", "comfy_quant"):
                 continue
             out[k] = f.get_tensor(k)
-        for i, m in enumerate(qmods):
+        for i, m in enumerate(qmods[: a.limit] if a.limit else qmods):
             c = cfg_of(f, m + ".comfy_quant")
             assert c.get("format") == "int8_tensorwise" and c.get("convrot"), (m, c)
             gs = int(c.get("convrot_groupsize", 256))
@@ -72,13 +74,15 @@ def main():
             del w, qd, prm
     meta = {k: v for k, v in meta.items() if k != "_quantization_metadata"}  # legacy map would override the new per-module configs
     meta = dict(meta, w4a4_source=a.src.replace("\\", "/").rsplit("/", 1)[-1], w4a4_tool="onegpu-longvideo tools/pc/convert_w4a4.py")
+    if a.limit:
+        print(json.dumps({"smoke_modules": a.limit, "seconds": round(time.perf_counter() - t0, 1), "rel_err_samples": errs})); return
     save_file(out, a.dst, metadata=meta)  # save first: the bench must not be able to lose the conversion
     del out
     torch.cuda.empty_cache()
     bench = None
     if a.bench:
         with safe_open(a.src, "pt", device="cpu") as f:
-            bench = bench_one(f, qmods, dev, linear_dtype=a.linear_dtype)
+            bench = bench_one(f, qmods, "cuda", linear_dtype=a.linear_dtype)
     print(json.dumps({"modules": len(qmods), "seconds": round(time.perf_counter() - t0, 1), "rel_err_samples": errs,
                       "rel_err_max": max((e for _, e in errs), default=None), "bench": bench}))
 
