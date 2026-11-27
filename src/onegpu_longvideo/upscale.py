@@ -13,6 +13,8 @@ original path. Pass `opts` or set ONEGPU_UPSCALE_OPTS="cudnn_bench,channels_last
   interp_half   bicubic resize in fp16 instead of fp32 (not bit-exact)
   hwdec         ffmpeg decode with -hwaccel cuda (NVDEC)
   triton_post   fused Triton post-process (old opt-in, also ONEGPU_TRITON_FRAMEIO=1)
+  ts_cache      load a cached TorchScript trace of the fp16 model instead of importing spandrel (spandrel's
+                registry pulls torchvision: ~2 s per process on the PC). First use traces and saves it.
 """
 from __future__ import annotations
 
@@ -23,7 +25,34 @@ import subprocess
 import threading
 import time
 
-OPTS = ("cudnn_bench", "channels_last", "overlap", "interp_half", "hwdec", "triton_post")
+OPTS = ("cudnn_bench", "channels_last", "overlap", "interp_half", "hwdec", "triton_post", "ts_cache")
+
+
+def _ts_path(model_path: str) -> str:
+    import hashlib
+    import torch
+    st = os.stat(model_path)
+    key = hashlib.sha256(f"{os.path.abspath(model_path)}|{st.st_size}|{st.st_mtime_ns}|{torch.__version__}".encode()).hexdigest()[:16]
+    d = os.environ.get("ONEGPU_CACHE") or os.path.join(os.path.expanduser("~"), ".cache", "onegpu-longvideo")
+    return os.path.join(d, f"{os.path.basename(model_path)}.{key}.ts.pt")
+
+
+def load_model(model_path: str, ts_cache: bool = False):
+    """fp16 CUDA model. ts_cache: TorchScript trace cached per (file, size, mtime, torch version)."""
+    import torch
+    if ts_cache:
+        p = _ts_path(model_path)
+        if os.path.exists(p):
+            return torch.jit.load(p, map_location="cuda").eval()
+    from spandrel import ModelLoader
+    m = ModelLoader().load_from_file(model_path).model.eval().cuda().half()
+    if ts_cache:
+        with torch.inference_mode(False), torch.no_grad():
+            tr = torch.jit.trace(m, torch.rand(1, 3, 64, 64, device="cuda", dtype=torch.float16), check_trace=False)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tr.save(p + ".tmp")
+        os.replace(p + ".tmp", p)
+    return m
 
 
 def probe(path: str) -> dict:
@@ -40,6 +69,8 @@ def encoder_args(x264: bool, quality: int) -> list[str]:
 
 def resolve_opts(opts: dict | None) -> dict:
     env = {k.strip() for k in os.environ.get("ONEGPU_UPSCALE_OPTS", "").split(",") if k.strip()}
+    if env - set(OPTS):
+        raise ValueError(f"unknown ONEGPU_UPSCALE_OPTS: {sorted(env - set(OPTS))}")
     o = {k: (k in env) for k in OPTS}
     if os.environ.get("ONEGPU_TRITON_FRAMEIO") == "1":
         o["triton_post"] = True
@@ -61,11 +92,11 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
     t0 = time.perf_counter()
     pr = probe(inp)
     w, h, fps = pr["width"], pr["height"], pr["r_frame_rate"]
+    cudnn_prev = torch.backends.cudnn.benchmark
     if o["cudnn_bench"]:
         torch.backends.cudnn.benchmark = True
     if model is None:
-        from spandrel import ModelLoader
-        model = ModelLoader().load_from_file(model_path).model.eval().cuda().half()
+        model = load_model(model_path, o["ts_cache"])
     if o["channels_last"]:
         model = model.to(memory_format=torch.channels_last)
     post = None
@@ -95,79 +126,96 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
                 qin.put(None)
                 return
 
+    werr: list = []
+
     def writer():
+        # On any error: remember it, keep draining qout and returning pinned slots so the producer never blocks.
         while True:
             x = qout.get()
             if x is None:
                 break
-            if isinstance(x, tuple):  # (event, pinned tensor, n, slot release): wait for its async D2H copy
-                ev, pin, k, release = x
-                ev.synchronize()
-                a = pin[:k].numpy()
-                if tap is not None:
-                    tap(a)
-                enc.stdin.write(a.tobytes())
-                release.put(pin)
-            else:
-                if tap is not None:
-                    tap(x)
-                enc.stdin.write(x.tobytes())
-        enc.stdin.close()
+            try:
+                if isinstance(x, tuple):  # (event, pinned tensor, n, slot release): wait for its async D2H copy
+                    ev, pin, k, release = x
+                    try:
+                        if not werr:
+                            ev.synchronize()
+                            a = pin[:k].numpy()
+                            if tap is not None:
+                                tap(a)
+                            enc.stdin.write(a.tobytes())
+                    finally:
+                        release.put(pin)
+                elif not werr:
+                    if tap is not None:
+                        tap(x)
+                    enc.stdin.write(x.tobytes())
+            except Exception as e:  # noqa: BLE001
+                werr.append(e)
+        try:
+            enc.stdin.close()
+        except OSError as e:
+            werr.append(e)
 
+    copy_stream = torch.cuda.Stream() if o["overlap"] else None
+    pins: queue.Queue = queue.Queue()
+    if o["overlap"]:  # allocated before the workers start, so a failed allocation leaves no thread blocked
+        for _ in range(3):  # 3 pinned slots: compute k+1 and k+2 while the writer drains k
+            pins.put(torch.empty((batch, height, width, 3), dtype=torch.uint8, pin_memory=True))
     threading.Thread(target=reader, daemon=True).start()
     wt = threading.Thread(target=writer)
     wt.start()
-    copy_stream = torch.cuda.Stream() if o["overlap"] else None
-    pins: queue.Queue = queue.Queue()
-    if o["overlap"]:
-        for _ in range(3):  # 3 pinned slots: compute k+1 and k+2 while the writer drains k
-            pins.put(torch.empty((batch, height, width, 3), dtype=torch.uint8, pin_memory=True))
     t1 = time.perf_counter()
     gpu = 0.0
     n = 0
-    with torch.inference_mode():
-        while True:
-            x = qin.get()
-            if x is None:
-                break
-            g0 = time.perf_counter()
-            xt = torch.from_numpy(x)
-            if o["overlap"]:
-                xt = xt.pin_memory().cuda(non_blocking=True)
-            else:
-                xt = xt.cuda()
-            t = xt.permute(0, 3, 1, 2).half().div_(255)
-            if o["channels_last"]:
-                t = t.contiguous(memory_format=torch.channels_last)
-            y = model(t)
-            if o["interp_half"]:
-                y = F.interpolate(y, size=(height, width), mode="bicubic", antialias=True).float()
-            else:
-                y = F.interpolate(y.float(), size=(height, width), mode="bicubic", antialias=True)
-            if post is not None:  # fused Triton: clamp*255, rint, byte, NHWC in one pass (bit-exact)
-                ob = post(y.contiguous())
-            else:
-                ob = y.clamp_(0, 1).mul_(255).round_().byte().permute(0, 2, 3, 1).contiguous()
-            if o["overlap"]:
-                pin = pins.get()
-                done = torch.cuda.current_stream().record_event()
-                with torch.cuda.stream(copy_stream):
-                    copy_stream.wait_event(done)
-                    pin[: len(x)].copy_(ob, non_blocking=True)
-                    ob.record_stream(copy_stream)
-                    ev = copy_stream.record_event()
-                gpu += time.perf_counter() - g0
-                qout.put((ev, pin, len(x), pins))
-            else:
-                a = ob.cpu().numpy()
-                torch.cuda.synchronize()
-                gpu += time.perf_counter() - g0
-                qout.put(a)
-            n += len(x)
-    qout.put(None)
+    try:
+        with torch.inference_mode():
+            while True:
+                x = qin.get()
+                if x is None:
+                    break
+                g0 = time.perf_counter()
+                xt = torch.from_numpy(x)
+                if o["overlap"]:
+                    xt = xt.pin_memory().cuda(non_blocking=True)
+                else:
+                    xt = xt.cuda()
+                t = xt.permute(0, 3, 1, 2).half().div_(255)
+                if o["channels_last"]:
+                    t = t.contiguous(memory_format=torch.channels_last)
+                y = model(t)
+                if o["interp_half"]:
+                    y = F.interpolate(y, size=(height, width), mode="bicubic", antialias=True).float()
+                else:
+                    y = F.interpolate(y.float(), size=(height, width), mode="bicubic", antialias=True)
+                if post is not None:  # fused Triton: clamp*255, rint, byte, NHWC in one pass (bit-exact)
+                    ob = post(y.contiguous())
+                else:
+                    ob = y.clamp_(0, 1).mul_(255).round_().byte().permute(0, 2, 3, 1).contiguous()
+                if o["overlap"]:
+                    pin = pins.get()
+                    done = torch.cuda.current_stream().record_event()
+                    with torch.cuda.stream(copy_stream):
+                        copy_stream.wait_event(done)
+                        pin[: len(x)].copy_(ob, non_blocking=True)
+                        ob.record_stream(copy_stream)
+                        ev = copy_stream.record_event()
+                    gpu += time.perf_counter() - g0
+                    qout.put((ev, pin, len(x), pins))
+                else:
+                    a = ob.cpu().numpy()
+                    torch.cuda.synchronize()
+                    gpu += time.perf_counter() - g0
+                    qout.put(a)
+                n += len(x)
+    finally:
+        qout.put(None)  # always stop the writer, also when the GPU loop raises
     wt.join()
     enc.wait()
     dec.wait()
+    torch.backends.cudnn.benchmark = cudnn_prev
+    if werr:
+        raise RuntimeError(f"upscale writer failed: {werr[0]!r}") from werr[0]
     t2 = time.perf_counter()
     return {"in": inp, "out": out, "size": [width, height], "frames": n, "load_s": round(t_load, 1), "pipeline_s": round(t2 - t1, 2),
             "gpu_s": round(gpu, 2), "fps": round(n / max(t2 - t1, 1e-9), 2), "encoder": "x264" if x264 else "nvenc",

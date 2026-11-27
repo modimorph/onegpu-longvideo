@@ -20,7 +20,7 @@ from onegpu_longvideo import upscale as U  # noqa: E402
 
 inp, mp, od = sys.argv[1], sys.argv[2], sys.argv[3]
 levers = sys.argv[4].split(",") if len(sys.argv) > 4 else ["overlap", "hwdec", "cudnn_bench", "channels_last", "interp_half"]
-EXACT = {"overlap", "hwdec", "triton_post"}
+EXACT = {"overlap", "hwdec", "triton_post", "ts_cache"}
 os.makedirs(od, exist_ok=True)
 W, H = 1920, 1080
 
@@ -40,6 +40,9 @@ def run(name, opts, ref=None):
             frames.append(a.copy())
             return
         for f in a:
+            if stats["n"] >= len(ref):
+                stats["n"] += 1  # extra frame: fails the count check below
+                continue
             r = ref[stats["n"]]
             d = np.abs(f.astype(np.int16) - r.astype(np.int16))
             stats["maxabs"] = max(stats["maxabs"], int(d.max()))
@@ -58,7 +61,7 @@ def run(name, opts, ref=None):
         r["psnr"] = "inf" if mse == 0 else round(10 * math.log10(255 ** 2 / mse), 2)
         r["frames_cmp"] = stats["n"]
         exact = all(k in EXACT for k in opts if opts[k])
-        r["gate"] = "pass" if (stats["maxabs"] == 0 if exact else (mse == 0 or (10 * math.log10(255 ** 2 / mse) >= 50 and stats["maxabs"] <= 3))) else "FAIL"
+        r["gate"] = "FAIL" if stats["n"] != len(ref) or not ref else "pass" if (stats["maxabs"] == 0 if exact else (mse == 0 or (10 * math.log10(255 ** 2 / mse) >= 50 and stats["maxabs"] <= 3))) else "FAIL"
     print(json.dumps(r), flush=True)
     return r, frames
 
