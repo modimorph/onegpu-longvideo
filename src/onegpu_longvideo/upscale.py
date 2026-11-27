@@ -187,10 +187,11 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
         except OSError as e:
             werr.append(e)
 
-    copy_stream = torch.cuda.Stream() if o["overlap"] else None
+    copy_stream = None
     pins: queue.Queue = queue.Queue()
     if o["overlap"]:  # allocated before the workers start, so a failed allocation leaves no thread blocked
         try:
+            copy_stream = torch.cuda.Stream()
             for _ in range(3):  # 3 pinned slots: compute k+1 and k+2 while the writer drains k
                 pins.put(torch.empty((batch, height, width, 3), dtype=torch.uint8, pin_memory=True))
         except Exception:  # stop and reap both ffmpeg children before re-raising
@@ -198,6 +199,7 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
                 if p_.poll() is None:
                     p_.kill()
                 p_.wait()
+            torch.backends.cudnn.benchmark = cudnn_prev
             raise
     threading.Thread(target=reader, daemon=True).start()
     wt = threading.Thread(target=writer)
