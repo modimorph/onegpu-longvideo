@@ -120,7 +120,8 @@ mode = os.environ.get("BENCH_MODE", "all")
 if mode in ("all", "micro"):
     print(json.dumps({"micro": micro()}), flush=True)
 if mode in ("all", "runs"):
-    U.load_model(mp, True)  # prime the TorchScript cache, so the ts_cache run really uses the trace
+    if any("ts_cache" in lv for lv in levers):
+        U.load_model(mp, True)  # prime the TorchScript cache, so the ts_cache run really uses the trace
     run("warmup", {})  # excluded
     base, ref = run("baseline", {})
     res = [base]

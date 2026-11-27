@@ -66,8 +66,9 @@ def load_model(model_path: str, ts_cache: bool = False):
         with torch.inference_mode(False), torch.no_grad():
             tr = torch.jit.trace(m, torch.rand(1, 3, 64, 64, device="cuda", dtype=torch.float16), check_trace=False)
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        tr.save(p + ".tmp")
-        os.replace(p + ".tmp", p)
+        tmp = f"{p}.{os.getpid()}.{threading.get_ident()}.tmp"  # unique per writer; os.replace is atomic
+        tr.save(tmp)
+        os.replace(tmp, p)
     return m
 
 
@@ -224,12 +225,14 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
                     gpu += time.perf_counter() - g0
                     qout.put(a)
                 n += len(x)
-    finally:
-        qout.put(None)  # always stop the writer, also when the GPU loop raises
-    wt.join()
-    enc.wait()
-    dec.wait()
-    torch.backends.cudnn.benchmark = cudnn_prev
+    finally:  # always stop the writer and the ffmpeg processes and restore cuDNN, also when the GPU loop raises
+        qout.put(None)
+        wt.join()
+        enc.wait()
+        if dec.poll() is None:
+            dec.kill()
+        dec.wait()
+        torch.backends.cudnn.benchmark = cudnn_prev
     if werr:
         raise RuntimeError(f"upscale writer failed: {werr[0]!r}") from werr[0]
     t2 = time.perf_counter()
