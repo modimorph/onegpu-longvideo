@@ -42,8 +42,9 @@ def main():
         keys = list(f.keys())
         qmods = [k[: -len(".comfy_quant")] for k in keys if k.endswith(".comfy_quant")]
         qset = set(qmods)
-        if not qmods:
-            raise SystemExit("source has no per-module comfy_quant entries (legacy-only checkpoint): not supported")
+        legacy = json.loads(meta.get("_quantization_metadata") or "{}").get("layers") or {}
+        if not qmods or legacy:
+            raise SystemExit("source has no per-module comfy_quant entries or carries a non-empty legacy layer map: not supported")
         for k in keys:  # copy everything that is not a quantized module's weight / scale / config
             m = k.rsplit(".", 1)[0]
             if m in qset and k.split(".")[-1] in ("weight", "weight_scale", "comfy_quant"):
