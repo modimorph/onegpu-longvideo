@@ -35,6 +35,9 @@ def main():
     ap.add_argument("--check", type=int, default=16)
     ap.add_argument("--bench", action="store_true")
     a = ap.parse_args()
+    import os
+    if os.path.abspath(a.src) == os.path.abspath(a.dst):
+        raise SystemExit("DST must differ from SRC")
     dev = "cuda"
     out, errs, t0 = {}, [], time.perf_counter()
     with safe_open(a.src, "pt", device="cpu") as f:
