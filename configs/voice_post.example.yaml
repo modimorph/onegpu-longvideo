@@ -1,6 +1,19 @@
-# Voice post (optional). Replace the generated voice with a converted one, keep it only if the WER guard passes.
-# In our two samples the converted voice raised speaker similarity; kept on one, rejected by ear on the other (see docs/EXPERIMENTS.md). Listen before you keep it.
+# Voice post (optional). Replace the generated voice with a converted one. Method: docs/VOICE.md.
+# Order: diagnose the voice, pick a target by traits, convert, run the guards, then a human A/B listen of 3-5 labelled candidates at equal loudness.
+# Metrics (speaker match, DNSMOS) did not predict the listener in 2 of 3 cases. Listen before you keep it.
 converter_cmd: "python -m seed_vc.inference --source {source} --target {target} --output {output}"  # adapt to your Seed-VC install
-target_voice: my_consented_voice.wav   # a voice you own or have written consent to use
-sample_exact: true
-wer_guard_tolerance: 0.0
+target_voice: my_consented_voice.wav   # a voice you own, a public stock voice, or one with written consent. Never clone a real person without consent.
+# Target traits to look for (see docs/VOICE.md section 2):
+#   energy below 300 Hz 15-25 %, energy 1-3 kHz 12-20 %, F0 SD >= 3.5 st, F0 range >= 11 st, clean pauses, 10-15 s of clean speech.
+seed_vc:                 # settings used for the picked tutor candidate
+  model: seed-vc-v1
+  diffusion_steps: 50
+  inference_cfg_rate: 0.7
+  length_adjust: 1.0
+  f0_condition: false
+  fp16: false
+sample_exact: true       # decoded length must equal the original sample count
+wer_guard_tolerance: 0.0 # WER 0 in every 5 s window
+sync_offset_frames: 1    # SyncNet offset within +-1 frame (25 fps)
+loudness_lufs: -12.5     # gain only, same for every candidate; peaks under 0 dBFS (limiter if needed)
+human_listen_required: true

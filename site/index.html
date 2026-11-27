@@ -34,7 +34,7 @@ a{color:var(--accent)}
 <figure><video controls preload="metadata" playsinline poster="media/podcast.jpg" src="media/podcast.mp4"></video>
 <figcaption><b>Podcast host, 30 s, native speech</b><span>768x432, VSA sparse attention 10 %, 8 steps, then SPAN x2 to 1080p, then voice post (Seed-VC). Render 163 s + upscale 9.4 s + voice 16 s. Word error rate 0 % in all six 5-second windows. Speaker match 0.616 to 0.789.</span></figcaption></figure>
 <figure><video controls preload="metadata" playsinline poster="media/tutor.jpg" src="media/tutor.mp4"></video>
-<figcaption><b>Tutor, 30 s, native speech</b><span>1280x720, VSA 10 %, another seed, then SPAN x2 to 1080p. Render 547 s + upscale 20 s. Original model voice. WER 0 % in all six 5-second windows.</span></figcaption></figure>
+<figcaption><b>Tutor, 30 s, native speech</b><span>1280x720, VSA 10 %, another seed, then SPAN x2 to 1080p. Render 547 s + upscale 20 s, then voice post (Seed-VC to a stock male voice, chosen by a listening test). WER 0 % in all six 5-second windows, lip offset within 1 frame.</span></figcaption></figure>
 <figure><video controls preload="metadata" playsinline poster="media/potter.jpg" src="media/potter.mp4"></video>
 <figcaption><b>Potter documentary, 30 s single crane-down shot</b><span>1280x720, VSA 10 %, then SPAN x2 to 1080p. Render 541.5 s + upscale 20.0 s. No speech; ambient sound from the model.</span></figcaption></figure>
 </div>
