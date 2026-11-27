@@ -129,19 +129,32 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
     qout: queue.Queue = queue.Queue(4)
     fsz = w * h * 3
 
+    stop = threading.Event()
+
+    def put_in(v) -> bool:  # bounded put that gives up once the consumer has stopped
+        while not stop.is_set():
+            try:
+                qin.put(v, timeout=0.5)
+                return True
+            except queue.Full:
+                pass
+        return False
+
     def reader():
-        while True:
-            buf = []
-            for _ in range(batch):
-                b = dec.stdout.read(fsz)
-                if len(b) < fsz:
-                    break
-                buf.append(np.frombuffer(b, np.uint8).reshape(h, w, 3))
-            if buf:
-                qin.put(np.stack(buf))
-            if len(buf) < batch:
-                qin.put(None)
-                return
+        try:
+            while True:
+                buf = []
+                for _ in range(batch):
+                    b = dec.stdout.read(fsz)
+                    if len(b) < fsz:
+                        break
+                    buf.append(np.frombuffer(b, np.uint8).reshape(h, w, 3))
+                if buf and not put_in(np.stack(buf)):
+                    return
+                if len(buf) < batch:
+                    return
+        finally:
+            put_in(None)  # also on a reader exception, so the GPU loop never waits forever
 
     werr: list = []
 
@@ -226,6 +239,7 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
                     qout.put(a)
                 n += len(x)
     finally:  # always stop the writer and the ffmpeg processes and restore cuDNN, also when the GPU loop raises
+        stop.set()
         qout.put(None)
         wt.join()
         enc.wait()
