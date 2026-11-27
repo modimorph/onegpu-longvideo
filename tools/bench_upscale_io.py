@@ -35,19 +35,8 @@ def run(name, opts, ref=None):
     torch.backends.cudnn.benchmark = False
     frames, stats = [], {"maxabs": 0, "se": 0.0, "n": 0}
 
-    def tap(a):
-        if ref is None:
-            frames.append(a.copy())
-            return
-        for f in a:
-            if stats["n"] >= len(ref):
-                stats["n"] += 1  # extra frame: fails the count check below
-                continue
-            r = ref[stats["n"]]
-            d = np.abs(f.astype(np.int16) - r.astype(np.int16))
-            stats["maxabs"] = max(stats["maxabs"], int(d.max()))
-            stats["se"] += float((d.astype(np.float64) ** 2).mean())
-            stats["n"] += 1
+    def tap(a):  # cheap: copy frames only; the comparison runs after the timed call
+        frames.extend(f.copy() for f in a)
     full = {k: False for k in U.OPTS}
     full.update(opts)
     t0 = time.perf_counter()
@@ -56,6 +45,11 @@ def run(name, opts, ref=None):
     r["name"] = name
     r["gpu"] = gpu_state()
     if ref is not None:
+        stats["n"] = len(frames)
+        for f, rf in zip(frames, ref):
+            d = np.abs(f.astype(np.int16) - rf.astype(np.int16))
+            stats["maxabs"] = max(stats["maxabs"], int(d.max()))
+            stats["se"] += float((d.astype(np.float64) ** 2).mean())
         mse = stats["se"] / max(stats["n"], 1)
         r["maxabs"] = stats["maxabs"]
         r["psnr"] = "inf" if mse == 0 else round(10 * math.log10(255 ** 2 / mse), 2)
@@ -126,6 +120,7 @@ mode = os.environ.get("BENCH_MODE", "all")
 if mode in ("all", "micro"):
     print(json.dumps({"micro": micro()}), flush=True)
 if mode in ("all", "runs"):
+    U.load_model(mp, True)  # prime the TorchScript cache, so the ts_cache run really uses the trace
     run("warmup", {})  # excluded
     base, ref = run("baseline", {})
     res = [base]

@@ -37,13 +37,29 @@ def _ts_path(model_path: str) -> str:
     return os.path.join(d, f"{os.path.basename(model_path)}.{key}.ts.pt")
 
 
+class _Plain:
+    """Run a TorchScript module without the JIT fusers, so it calls the same ATen kernels as eager (bit-exact)."""
+
+    def __init__(self, m):
+        self.m = m
+
+    def to(self, *a, **k):
+        self.m = self.m.to(*a, **k)
+        return self
+
+    def __call__(self, x):
+        import torch
+        with torch.jit.optimized_execution(False):
+            return self.m(x)
+
+
 def load_model(model_path: str, ts_cache: bool = False):
     """fp16 CUDA model. ts_cache: TorchScript trace cached per (file, size, mtime, torch version)."""
     import torch
     if ts_cache:
         p = _ts_path(model_path)
         if os.path.exists(p):
-            return torch.jit.load(p, map_location="cuda").eval()
+            return _Plain(torch.jit.load(p, map_location="cuda").eval())
     from spandrel import ModelLoader
     m = ModelLoader().load_from_file(model_path).model.eval().cuda().half()
     if ts_cache:
