@@ -1,0 +1,77 @@
+import numpy as np
+
+from onegpu_longvideo.qa import detectors as D
+from onegpu_longvideo.qa import wer as Wr
+
+
+def _words(text, t0=0.0, step=0.4):
+    return [Wr.Word(w, t0 + i * step, t0 + i * step + 0.3) for i, w in enumerate(text.split())]
+
+
+def test_wer_clean():
+    ref = "one two three four five six"
+    r = Wr.score(ref, _words(ref), 10.0)
+    assert r["wer"] == 0 and Wr.passes(r) and len(r["windows"]) == 2
+
+
+def test_wer_invented_words_located_in_window():
+    ref = " ".join(f"w{i}" for i in range(20))
+    heard = _words(ref, step=0.5)
+    heard.insert(15, Wr.Word("blah", 7.6, 7.8))
+    heard.insert(16, Wr.Word("blah", 7.8, 7.9))
+    r = Wr.score(ref, heard, 10.0)
+    assert r["windows"][0]["invented"] == 0
+    assert r["windows"][1]["invented"] == 2
+    assert not Wr.passes(r)
+
+
+def test_wer_missing_and_wrong():
+    r = Wr.score("a b c d", _words("a x d"), 5.0)
+    ops = sorted(e["op"] for e in r["errors"])
+    assert ops == ["missing", "wrong"]
+
+
+def test_runs_and_stepdet():
+    assert D.runs([0, 1, 1, 0, 1, 0, 0, 1], gap=1) == [(1, 4), (7, 7)]
+    x = np.r_[np.zeros(50), np.ones(50)]
+    s = D.stepdet(x, k=10)
+    assert s[50] == 1.0 and s[20] == 0.0
+
+
+def test_identity_flags():
+    c = np.r_[np.full(48, 0.8), np.full(48, 0.3)]
+    types = {f["type"] for f in D.identity_flags(c, fps=24)}
+    assert types == {"identity_drift", "identity_jump"}
+
+
+def test_seam_flags():
+    d = np.abs(np.random.default_rng(0).normal(1, 0.1, 200))
+    d[120] = 10
+    f = D.seam_flags(d, fps=24)
+    assert [x["t"] for x in f] == [5.0]
+
+
+def test_gesture_repeat_detects_replay():
+    rng = np.random.default_rng(1)
+    fps = 24
+    g = np.sin(np.linspace(0, 6, 48))[:, None] * np.array([1.0, -0.5, 0.8, 0.3])
+    noise = rng.normal(0, 0.05, (400, 4))
+    X = noise.copy()
+    X[24:72] += g
+    X[240:288] += g
+    hits = D.gesture_repeats(X, fps)
+    assert any(abs(h["t_first"] - 1.0) < 0.01 and abs(h["t_repeat"] - 10.0) < 0.01 for h in hits)
+
+
+def test_av_offset():
+    fps = 24
+    rng = np.random.default_rng(2)
+    m = np.convolve(rng.random(300), np.ones(3) / 3, "same")
+    a = np.r_[np.zeros(2), m[:-2]]
+    ms, c = D.av_offset_ms(m, a, fps)
+    assert abs(ms - 2 * 1000 / 24) < 1e-6 and c > 0.9
+
+
+def test_merge_windows():
+    w = D.merge_windows([{"t_start": 1, "t_end": 2}, {"t_start": 2.2, "t_end": 3}, {"t": 10}], pad_s=0.5, max_len_s=3)
+    assert w[0] == (0.5, 3.5) and w[-1] == (9.5, 10.5) and all(b - a <= 3 for a, b in w)

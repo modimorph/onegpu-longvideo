@@ -1,0 +1,18 @@
+# Talking head (tutor), 30 s, one pass. Settings of our tutor sample (media/tutor.mp4).
+# Measured on our single 24 GB GPU: render 167 s at 768x432, upscale 9.1 s. Per-window WER 3.2 % overall:
+# one 5 s window (15-20 s) had errors, the other five were clean. See docs/EXPERIMENTS.md.
+name: tutor
+prompt_file: prompts/tutor.txt
+seconds: 29.96          # 719 frames at 24 fps (valid lengths are 17k + 5)
+width: 768
+height: 432
+seed: 7330
+steps: 8
+sampler: euler
+guidance: 1.0           # BasicGuider, no unconditional pass
+realism: 0.3
+attention: vsa
+vsa_keep_percent: 10
+ffn_chunk_tokens: 16384 # needs comfyui_nodes/onegpu_nodes.py; set 0 to drop it
+voice_ref: ""           # optional: a short voice-timbre clip you own, uploaded to ComfyUI input/
+upscale_to: [1920, 1080]

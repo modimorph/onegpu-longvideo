@@ -1,0 +1,18 @@
+# Talking head, 30 s, one pass. Settings of our published podcast sample (media/podcast.mp4).
+# Measured on our single 24 GB GPU: render 163 s at 768x432, SPAN x2 upscale to 1080p 9.2 s. Per-window WER 0 % on seed 7329;
+# the same recipe on seed 7330 had 4 invented words at 20.9-22.7 s. See docs/EXPERIMENTS.md.
+name: podcast_host
+prompt_file: prompts/podcast_host.txt
+seconds: 29.96          # 719 frames at 24 fps (valid lengths are 17k + 5)
+width: 768
+height: 432
+seed: 7329
+steps: 8
+sampler: euler
+guidance: 1.0           # BasicGuider, no unconditional pass
+realism: 0.3
+attention: vsa
+vsa_keep_percent: 10
+ffn_chunk_tokens: 16384 # needs comfyui_nodes/onegpu_nodes.py; set 0 to drop it
+voice_ref: ""           # optional: a short voice-timbre clip you own, uploaded to ComfyUI input/
+upscale_to: [1920, 1080]

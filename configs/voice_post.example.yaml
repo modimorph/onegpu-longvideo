@@ -1,0 +1,6 @@
+# Voice post (optional). Replace the generated voice with a converted one, keep it only if the WER guard passes.
+# In our two samples the converted voice raised speaker similarity but was NOT kept (see docs/EXPERIMENTS.md).
+converter_cmd: "python -m seed_vc.inference --source {source} --target {target} --output {output}"  # adapt to your Seed-VC install
+target_voice: my_consented_voice.wav   # a voice you own or have written consent to use
+sample_exact: true
+wer_guard_tolerance: 0.0

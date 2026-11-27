@@ -1,0 +1,6 @@
+Today I want to explain attention, the main idea inside a transformer.
+A model reads a sentence as a list of words, one small piece at a time.
+For each word, it asks a simple question: which other words matter to me right now?
+It gives every other word a score, and the high scores get more weight.
+Then it mixes their meaning together, so each word now carries useful context from the whole sentence around it.
+That is attention. Every word looks at every other word, and learns what to focus on.

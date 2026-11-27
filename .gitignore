@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+out/
+*.safetensors
+*.gguf
+*.ckpt
+*.pth
+.env
+.env.*
+.claude/settings.local.json
+.claude/sessions/
+.claude/conversations/
+CLAUDE.local.md

@@ -1,0 +1,138 @@
+# onegpu-longvideo
+
+Long one-shot talking-head and cinematic video, with native speech and sound, on one consumer GPU.
+It drives a joint audio-video diffusion transformer (the MiniMax-H3 / FastH3 Omni family) through ComfyUI,
+renders 30 s in a single pass, upscales to 1080p with a streaming SPAN x2 model, and checks the result with a two-stage QA.
+
+Watch the samples: **https://modimorph.github.io/onegpu-longvideo/**
+
+| Sample | What | Settings | Measured on our GPU |
+|---|---|---|---|
+| [podcast.mp4](media/podcast.mp4) | invented podcast host, 30 s, native speech, slow push-in | 768x432, VSA 10 %, 8 steps, seed 7329, then SPAN x2 to 1080p | render 163 s + upscale 9.2 s; per-window WER 0 % in all six 5 s windows |
+| [tutor.mp4](media/tutor.mp4) | invented tutor explains attention, 30 s, native speech | same, seed 7330 | render 167 s + upscale 9.1 s; WER 3.2 % (one window, 15-20 s, had errors) |
+| [potter.mp4](media/potter.mp4) | craft documentary, one continuous crane-down shot, no speech | 1280x720, VSA 10 %, then SPAN x2 to 1080p | render 541.5 s + upscale 20.0 s |
+
+All people in the samples are invented. Our runs used one 24 GB consumer GPU (an RTX 4090) on Windows with ComfyUI 0.41.
+These are our observations, not requirements. Numbers are n = 1 unless stated. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
+
+## How it works
+
+```mermaid
+flowchart LR
+    R["recipe YAML<br/>+ timeline prompt"] --> L["prompt lint<br/>(rate, tags, length)"]
+    L --> G["graph builder<br/>card graph + VSA + chunked FFN"]
+    G --> C["ComfyUI on the GPU<br/>one pass, 719 frames + audio"]
+    C --> U["streaming SPAN x2<br/>decode | GPU | encode"]
+    U --> Q1["QA stage 1 (CPU)<br/>per-window WER, identity,<br/>gestures, seams, AV offset"]
+    Q1 -->|flagged windows only| Q2["QA stage 2<br/>vision-language model"]
+    Q1 --> V["optional voice post<br/>sample-exact + WER guard"]
+    Q2 --> O["report + final MP4"]
+    V --> O
+```
+
+- **Card graph**: the sampler setup from the model card (Euler, 8 steps, guidance 1 with `BasicGuider`, sigma shift 12 video / 3 audio). Against our older graph (guidance 0.9, two LoRAs) it cut a 10 s 1024x576 clip from about 285 s to 141-167 s, with slightly better look and voice scores.
+- **VSA sparse attention** (ComfyUI `BlockSparseAttention`, keep 10 %): only video query rows go sparse; text, reference and audio rows stay dense. 3.4x faster than dense in our A/B, and speech got better, not worse.
+- **Chunked FFN** (`comfyui_nodes/onegpu_nodes.py`): runs the wide MLP in token chunks to cut peak memory, so 719 frames fit without spilling into shared memory.
+- **One pass, not a chain**: chained segments showed colour steps, identity dips and drops to silence at each join, so the samples are single passes. Past about 15 s, speech can break (see Limitations).
+- **Streaming upscale**: decode, model and encode overlap in three threads; a 30 s 1080p upscale took 9-20 s.
+
+## Quickstart
+
+```bash
+git clone https://github.com/modimorph/onegpu-longvideo && cd onegpu-longvideo
+pip install -e ".[dev]"          # pure-Python parts; tests run on CPU
+pytest -q                        # 40 tests, no GPU
+
+olv graph configs/talking_head_30s.yaml --out graph.json   # build the ComfyUI API graph (no GPU)
+olv lint configs/prompts/podcast_host.txt                  # check a prompt
+```
+
+To render you need a ComfyUI install with the MiniMax-H3 nodes and your own model weights:
+
+1. Get the weights yourself and accept each licence (see "Models and licences"). File names go in the recipe under `models:`.
+2. Copy `comfyui_nodes/onegpu_nodes.py` into `ComfyUI/custom_nodes/` and restart ComfyUI (or set `ffn_chunk_tokens: 0`).
+3. Start ComfyUI, then:
+
+```bash
+export COMFY_URL=http://127.0.0.1:8188
+olv render configs/talking_head_30s.yaml --out-dir out/
+pip install -e ".[gpu]"
+olv upscale out/podcast_host_raw.mp4 out/podcast_host_1080p.mp4 path/to/2xNomosUni_span_multijpg.safetensors
+pip install -e ".[qa]"
+olv wer out/podcast_host_1080p.wav configs/prompts/podcast_host.lines.txt   # 16 kHz mono wav from ffmpeg
+olv camera out/podcast_host_1080p.mp4 --plan push
+```
+
+## Configuration
+
+A recipe is one YAML file; every field maps to `onegpu_longvideo.recipe.Recipe`.
+
+| File | Use |
+|---|---|
+| `configs/talking_head_30s.yaml` | podcast sample settings |
+| `configs/tutor_30s.yaml` | tutor sample settings |
+| `configs/documentary.yaml` | potter sample settings (720p, no speech) |
+| `configs/cinematic.yaml` | an invented action street scene, sound effects only (not one of the published samples) |
+| `configs/voice_post.example.yaml` | optional voice conversion with the WER guard |
+| `configs/prompts/*.txt` | the exact prompts; `*.lines.txt` are the intended lines for WER |
+
+Prompt rules that mattered in our runs: continuous speech with no planned silence (the model fills silence with invented words), about 2.8-3.1 words per second, one new one-hand gesture per line, a time-coded camera plan, no trailing space before `</d>`.
+
+## Package map
+
+| Module | What |
+|---|---|
+| `frames` | 17k+5 frame rule, latent and token counts, temporal RoPE periods, windows |
+| `prompt` | timeline prompt builder and linter |
+| `recipe` | YAML recipe dataclass |
+| `workflow` | ComfyUI graph builder (card graph, LoRA chain, VSA, chunked FFN, video guide for chains), graph validator |
+| `comfy` | ComfyUI HTTP client; reads ComfyUI's own execution time |
+| `upscale` | streaming SPAN (spandrel) upscaler with NVENC or x264 |
+| `qa.wer` | per-window WER with error map (wrong, invented, missing) |
+| `qa.detectors` | identity drift and jumps, seams, gesture repeats, AV offset, stage-2 window merging |
+| `qa.stage2` | vision-language model check on flagged windows (any OpenAI-compatible endpoint) |
+| `voice` | voice post: sample-exact length, envelope lag per window, WER guard |
+| `camera` | camera-path estimate and plan check |
+| `timing` | stage timing log, GPU memory sampler, torch profiler helper |
+
+## What we tried and what happened
+
+Short version; the full tables are in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) and [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+- **Route to 30 s at 1080p**: native 1080p did not fit (activations about 31 GB, estimated). 720p + VSA + streaming SPAN x2 took 12.7 min end to end (762 s), measured.
+- **Attention**: VSA keep 10 % was 3.4x faster than dense. Sage on video rows only was 1.44x. `torch.compile` failed at step 1.
+- **Resolution vs time at 30 s**: before VSA, 768x432 took about 504-515 s and 1024x576 took 1313 s; with VSA, 768x432 took 163 s.
+- **Length**: 30 s worked with prompt discipline. 45 s and 60 s single passes filled with invented words (60 s: WER 0.495 and 1.62 on two tries).
+- **Chaining** five 13 s segments with a video guide: 447 s for 60 s, WER 6 %, but colour steps, identity dips and silence at every join. Dropped.
+- **Identity LoRA**: we trained a single-identity LoRA on consented data in rounds; what helped and what did not is in EXPERIMENTS.md section 7. No weights or data ship here.
+- **Voice post** (Seed-VC): raised speaker similarity but was not kept on the published takes.
+- **Temporal RoPE stretch** (to push past the trained 15 s): made speech much worse.
+
+## Limitations
+
+- Speech past about 15 s: every speech error we measured at 30 s started at 14.5 s or later. One seed passes, the next can fail. Generate 2+ takes and pick by per-window WER.
+- Two-hand gestures cross and fuse; we avoid props that change state in talking-head prompts.
+- QA stage 2 is built but not scored against a labelled set.
+- Results come from one GPU model and one OS; other setups are untested.
+More in [docs/LIMITATIONS.md](docs/LIMITATIONS.md) and [docs/QA.md](docs/QA.md).
+
+## Models and licences
+
+This repository is Apache-2.0 and ships **no model weights**. You bring your own weights and must accept each model's licence:
+the MiniMax-H3 / FastH3 family (its licence has **territory limits**: read it before use), the realism LoRA, the text encoder,
+the SPAN upscaler weights, faster-whisper, Seed-VC and any face or pose model you use for QA.
+Only generate a real person's likeness or voice with that person's written consent.
+
+## Connect your coding agent
+
+Point your agent (Claude Code, Codex, or similar) at this README and these entry points:
+
+1. Read `AGENTS.md` for the rules of this repo, then `docs/EXPERIMENTS.md` for what already failed.
+2. `pytest -q` must pass before and after a change. CI runs `ruff check src tests` and `pytest` on CPU.
+3. Change a render by editing a recipe YAML, not code. Build the graph with `olv graph` and inspect it before a GPU run.
+4. Measure, then claim: every speed or quality claim needs the command and its output (`timings.jsonl`, `olv wer` JSON).
+5. One GPU job at a time. Two renders at once were 3.5x slower on our card.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Experiments with numbers are as welcome as code.

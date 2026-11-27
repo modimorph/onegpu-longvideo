@@ -1,0 +1,14 @@
+# Cinematic action, 30 s single shot, sound effects only (an invented street scene).
+name: action_street
+prompt_file: prompts/action_street.txt
+seconds: 29.96
+width: 1280
+height: 720
+seed: 7329
+steps: 8
+guidance: 1.0
+realism: 0.3
+attention: vsa
+vsa_keep_percent: 10
+ffn_chunk_tokens: 16384
+upscale_to: [1920, 1080]

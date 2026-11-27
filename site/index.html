@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>onegpu-longvideo</title>
+<meta name="description" content="Long one-shot talking-head and cinematic video with native audio on one consumer GPU.">
+<style>
+:root{--bg:#faf9f6;--fg:#1d1d1b;--muted:#5f5e58;--card:#fff;--line:#e3e1da;--accent:#9a4a1f}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--fg:#ecebe6;--muted:#a3a197;--card:#1e1e1c;--line:#33322e;--accent:#e08a5b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1040px;margin:0 auto;padding:40px 16px 64px}
+h1{font-size:2rem;margin:0 0 .3rem}
+p.lead{color:var(--muted);max-width:720px;margin:0 0 2rem}
+.grid{display:grid;gap:24px}
+figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+video{width:100%;display:block;background:#000;aspect-ratio:16/9}
+figcaption{padding:12px 16px 16px}
+figcaption b{display:block;margin-bottom:4px}
+figcaption span{color:var(--muted);font-size:.92rem}
+section{margin-top:2.5rem}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
+a{color:var(--accent)}
+.note{color:var(--muted);font-size:.9rem}
+</style>
+</head>
+<body>
+<main>
+<h1>onegpu-longvideo</h1>
+<p class="lead">Thirty-second one-shot clips with native speech and sound from a joint audio-video diffusion transformer, rendered on one 24 GB consumer GPU, upscaled to 1080p with a streaming SPAN x2 model. All people shown are invented. Code and full notes: <a href="https://github.com/modimorph/onegpu-longvideo">github.com/modimorph/onegpu-longvideo</a>.</p>
+<div class="grid">
+<figure><video controls preload="metadata" playsinline poster="media/podcast.jpg" src="media/podcast.mp4"></video>
+<figcaption><b>Podcast host, 30 s, native speech</b><span>768x432, VSA sparse attention 10 %, 8 steps, then SPAN x2 to 1080p. Render 163 s + upscale 9.2 s. Word error rate 0 % in all six 5-second windows.</span></figcaption></figure>
+<figure><video controls preload="metadata" playsinline poster="media/tutor.jpg" src="media/tutor.mp4"></video>
+<figcaption><b>Tutor, 30 s, native speech</b><span>Same recipe, another seed. Render 167 s + upscale 9.1 s. WER 3.2 %: one window (15-20 s) has errors.</span></figcaption></figure>
+<figure><video controls preload="metadata" playsinline poster="media/potter.jpg" src="media/potter.mp4"></video>
+<figcaption><b>Potter documentary, 30 s single crane-down shot</b><span>1280x720, VSA 10 %, then SPAN x2 to 1080p. Render 541.5 s + upscale 20.0 s. No speech; ambient sound from the model.</span></figcaption></figure>
+</div>
+<section>
+<h2>What we measured</h2>
+<table>
+<tr><th>Finding</th><th>Number (our GPU, n = 1 unless noted)</th></tr>
+<tr><td>VSA sparse attention vs dense</td><td>3.4x faster; speech WER did not get worse</td></tr>
+<tr><td>30 s at 1080p, end to end (720p render + streaming upscale)</td><td>762 s</td></tr>
+<tr><td>Where speech breaks at 30 s</td><td>every error we measured started at 14.5 s or later; the model was trained on clips up to 15 s</td></tr>
+<tr><td>45 s and 60 s single passes</td><td>filled with invented words; not usable</td></tr>
+</table>
+<p class="note">Observations from our runs, not requirements. Bring your own model weights and accept each licence; the MiniMax-H3 family licence has territory limits.</p>
+</section>
+</main>
+</body>
+</html>
