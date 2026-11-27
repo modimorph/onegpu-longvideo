@@ -8,8 +8,8 @@ Watch the samples: **https://modimorph.github.io/onegpu-longvideo/**
 
 | Sample | What | Settings | Measured on our GPU |
 |---|---|---|---|
-| [podcast.mp4](media/podcast.mp4) | invented podcast host, 30 s, native speech, slow push-in | 768x432, VSA 10 %, 8 steps, seed 7329, then SPAN x2 to 1080p | render 163 s + upscale 9.2 s; per-window WER 0 % in all six 5 s windows |
-| [tutor.mp4](media/tutor.mp4) | invented tutor explains attention, 30 s, native speech | same, seed 7330 | render 167 s + upscale 9.1 s; WER 3.2 % (one window, 15-20 s, had errors) |
+| [podcast.mp4](media/podcast.mp4) | invented podcast host, 30 s, native speech, slow push-in, voice post kept | 768x432, VSA 10 %, 8 steps, seed 7329, then SPAN x2 to 1080p, then Seed-VC | render 163 s + upscale 9.4 s + voice 16 s (GPU); per-window WER 0 % in all six 5 s windows; speaker match 0.616 to 0.789 |
+| [tutor.mp4](media/tutor.mp4) | invented tutor explains attention, 30 s, native speech, voice post kept | 1280x720, VSA 10 %, 8 steps, seed 7330, then SPAN x2 to 1080p, then Seed-VC | render 547 s + upscale 20 s + voice 269 s (CPU); per-window WER 0 % in all six 5 s windows; speaker match 0.613 to 0.732 (reference: the neutral clip of the stock voice) |
 | [potter.mp4](media/potter.mp4) | craft documentary, one continuous crane-down shot, no speech | 1280x720, VSA 10 %, then SPAN x2 to 1080p | render 541.5 s + upscale 20.0 s |
 
 All people in the samples are invented. Our runs used one 24 GB consumer GPU (an RTX 4090) on Windows with ComfyUI 0.41.
@@ -105,7 +105,7 @@ Short version; the full tables are in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md)
 - **Length**: 30 s worked with prompt discipline. 45 s and 60 s single passes filled with invented words (60 s: WER 0.495 and 1.62 on two tries).
 - **Chaining** five 13 s segments with a video guide: 447 s for 60 s, WER 6 %, but colour steps, identity dips and silence at every join. Dropped.
 - **Identity LoRA**: we trained a single-identity LoRA on consented data in rounds; what helped and what did not is in EXPERIMENTS.md section 7. No weights or data ship here.
-- **Voice post** (Seed-VC): raised speaker similarity but was not kept on the published takes.
+- **Voice post** (Seed-VC): raised speaker similarity on both samples and is kept on both. It passed the WER and SyncNet guards on the podcast with the stock reference, and on the tutor only with a neutral-only reference (three other settings failed the sync guard by one frame).
 - **Temporal RoPE stretch** (to push past the trained 15 s): made speech much worse.
 
 ## Limitations
