@@ -9,9 +9,7 @@ from .frames import frames_for_seconds
 
 @dataclass
 class Models:
-    # W4A4 (INT4 weights + activations, int4 tensor cores) made from the int8 file by tools/pc/convert_w4a4.py.
-    # int8 original: "fasth3_omniref_8step_pruned_int8_convrot.safetensors".
-    unet: str = "fasth3_omniref_8step_pruned_w4a4_convrot.safetensors"
+    unet: str = "fasth3_omniref_8step_pruned_int8_convrot.safetensors"
     text_encoder: str = "qwen3vl_32b_minimax_h3-Q4_K_M.gguf"
     text_encoder_loader: str = "CLIPLoaderGGUF"  # or CLIPLoader for safetensors
     # int8 decoder (ComfyUI >= 0.36 fused int8 kernels: int8 GEMM with folded norm/act/skip, int8 attention).
