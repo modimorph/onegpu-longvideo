@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "olv-native"
+version = "0.1.0"
+description = "Optional Rust cores for onegpu-longvideo (WER alignment, voice envelope). The package works without it."
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+[tool.maturin]
+module-name = "olv_native"

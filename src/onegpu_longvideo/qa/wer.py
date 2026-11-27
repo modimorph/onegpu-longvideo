@@ -9,6 +9,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+try:  # optional Rust core: pip install ./native/olv_native
+    import olv_native as _native
+except ImportError:
+    _native = None
+
 
 @dataclass
 class Word:
@@ -23,7 +28,15 @@ def normalize(s: str) -> list[str]:
 
 
 def align(ref: list[str], hyp: list[str]) -> list[tuple[str, int | None, int | None]]:
-    """Levenshtein alignment. Ops: M match, S substitution, D deletion (missing), I insertion (invented)."""
+    """Levenshtein alignment. Ops: M match, S substitution, D deletion (missing), I insertion (invented).
+    Uses the Rust core from native/olv_native when installed (same op list, tests/test_native.py)."""
+    if _native is not None:
+        return [tuple(o) for o in _native.align(list(ref), list(hyp))]
+    return align_py(ref, hyp)
+
+
+def align_py(ref: list[str], hyp: list[str]) -> list[tuple[str, int | None, int | None]]:
+    """Pure-Python original (reference for the Rust core)."""
     n, k = len(ref), len(hyp)
     D = [[0] * (k + 1) for _ in range(n + 1)]
     for i in range(n + 1):
