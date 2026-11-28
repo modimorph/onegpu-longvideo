@@ -16,7 +16,7 @@ NATIVE = {
     "UNETLoader", "CLIPLoader", "CLIPLoaderGGUF", "VAELoader", "RandomNoise", "KSamplerSelect", "BasicScheduler",
     "MiniMaxH3ReferenceToVideo", "BasicGuider", "CFGGuider", "SamplerCustomAdvanced", "VAEDecode", "VAEDecodeTiled",
     "VAEDecodeAudio", "CreateVideo", "SaveVideo", "LoraLoaderModelOnly", "MiniMaxH3SigmaShift", "BlockSparseAttention",
-    "LoadImage", "LoadAudio", "LoadVideo", "GetVideoComponents", "MiniMaxH3AddGuide", "TorchCompileModel",
+    "LoadImage", "LoadAudio", "LoadVideo", "GetVideoComponents", "MiniMaxH3AddGuide", "TorchCompileModel", "ManualSigmas",
 }
 OURS = {"FLChunkFFN", "FLSageVideoRows", "FLTemporalRoPE", "OLVUpscaleVideoSave"}
 
@@ -66,7 +66,10 @@ def build(prompt: str, r: Recipe, output_prefix: str = "onegpu/render") -> dict:
     elif r.attention == "sage":
         tip = _model_patch(g, tip, "fl_sage", {"class_type": "FLSageVideoRows", "inputs": {
             "pv": "fp16acc32", "smooth_k": True, "dense_blocks": "", "start_percent": 0.0, "end_percent": 1.0}})
-    g["sigmas"] = {"class_type": "BasicScheduler", "inputs": {"scheduler": "simple", "steps": int(r.steps), "denoise": 1.0, "model": sched_model}}
+    if r.grid_steps:  # Track R: a subset of the trained 8-step grid (e.g. 6 steps), not BasicScheduler's off-grid points
+        g["sigmas"] = {"class_type": "ManualSigmas", "inputs": {"sigmas": ", ".join(f"{v:.6f}" for v in r.manual_sigmas())}}
+    else:
+        g["sigmas"] = {"class_type": "BasicScheduler", "inputs": {"scheduler": "simple", "steps": int(r.steps), "denoise": 1.0, "model": sched_model}}
     if abs(r.guidance - 1.0) < 1e-9:
         g["guider"] = {"class_type": "BasicGuider", "inputs": {"model": tip, "conditioning": ["cond", 0]}}
     else:

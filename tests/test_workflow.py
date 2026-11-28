@@ -82,3 +82,19 @@ def test_upscale_in_graph_size_and_name():
     assert g["save"]["inputs"]["filename_prefix"].endswith("_720p")
     with _pt.raises(ValueError):
         W.build("x", R.Recipe(upscale_to=[32, 32]))
+
+
+def test_grid_steps_manual_sigmas():
+    from onegpu_longvideo.recipe import Recipe
+    from onegpu_longvideo.workflow import build, validate
+
+    r = Recipe(seconds=10, grid_steps=[0, 4, 8, 16, 24, 28, 32])
+    assert r.steps == 6
+    s = r.manual_sigmas()
+    assert s[0] == 1.0 and s[-1] == 0.0 and all(b < a for a, b in zip(s, s[1:]))
+    g = build("hello", r)
+    assert g["sigmas"]["class_type"] == "ManualSigmas" and not validate(g)
+    # the 8-step grid reproduces BasicScheduler simple's shifted points at t = 1 - k/8
+    r8 = Recipe(seconds=10, grid_steps=[0, 4, 8, 12, 16, 20, 24, 28, 32])
+    assert abs(r8.manual_sigmas()[4] - 12 * 0.5 / (1 + 11 * 0.5)) < 1e-6
+    assert build("hello", Recipe(seconds=10))["sigmas"]["class_type"] == "BasicScheduler"
