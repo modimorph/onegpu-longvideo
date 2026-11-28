@@ -108,10 +108,12 @@ def find_flaws(words: list[dict], reference: str, earlier: list[str] | None = No
         if seen[g] >= max(1, ref_grams[g]) and g in seen:
             # extend the replayed run as long as it keeps following the earlier copy ("... how it works" to the end)
             hist = ctx + toks[:i]
-            pos = max(j for j in range(len(hist) - ngram + 1) if tuple(hist[j:j + ngram]) == g)
+            hits = [j for j in range(len(hist) - ngram + 1) if tuple(hist[j:j + ngram]) == g]
             L = ngram
-            while i + L < len(toks) and pos + L < len(hist) and toks[i + L] == hist[pos + L]:
-                L += 1
+            if hits:          # (an overlapping earlier copy may not be complete in hist: then no extension)
+                pos = hits[-1]
+                while i + L < len(toks) and pos + L < len(hist) and toks[i + L] == hist[pos + L]:
+                    L += 1
             flaws.append({"kind": "repeat", "i0": i, "i1": min(len(toks), i + L)})
             for k in range(i, min(len(toks), i + L) - ngram + 1):
                 seen[tuple(toks[k:k + ngram])] += 1
@@ -138,6 +140,11 @@ def cut_list(words: list[dict], duration: float, flaws: list[dict], prof: dict) 
     # IN/OUT from the first and last word that STAYS (a cut filler at the end left a silent 0.25 s stub before)
     t_in = max(0.0, words[kept[0]]["t0"] - cu["lead_pad_s"]) if cu["trim_in"] else 0.0
     t_out = min(duration, words[kept[-1]]["t1"] + cu["tail_pad_s"]) if cu["trim_out"] else duration
+    # the pads must not reach into a removed word next to the kept range (a cut filler 0.1 s after the last word)
+    if kept[0] > 0:
+        t_in = max(t_in, (words[kept[0] - 1]["t1"] + words[kept[0]]["t0"]) / 2)
+    if kept[-1] < len(words) - 1:
+        t_out = min(t_out, (words[kept[-1]]["t1"] + words[kept[-1] + 1]["t0"]) / 2)
     cuts = []
     if cu["internal"]:
         for f in flaws:

@@ -185,3 +185,21 @@ def test_new_camera_setup_gets_its_own_colour_anchor(tmp_path):
     assert c3["colour_before"]["dE76_vs_anchor"] > 3 and c3["colour_after"]["dE76_vs_anchor"] < c3["colour_before"]["dE76_vs_anchor"] / 2   # toward clip 2
     j = {x["join"]: x for x in qa["colour_joins"]}
     assert j["1->2"]["gated"] is False and j["2->3"]["gated"] is True
+
+
+def test_cut_logic_fuzz_never_cuts_inside_a_word():
+    import random
+
+    random.seed(5)
+    vocab = "we made one long shot on card um uh the end of it and so".split()
+    for _ in range(500):
+        t, words = random.uniform(0, 1), []
+        for _ in range(random.randint(0, 40)):
+            d = random.uniform(0.05, 0.6)
+            words.append({"w": random.choice(vocab), "t0": round(t, 3), "t1": round(t + d, 3)})
+            t += d + random.uniform(0, 0.5)
+        prev = [random.choice(vocab) for _ in range(random.randint(0, 40))]
+        f = ED.find_flaws(words, " ".join(random.choice(vocab) for _ in range(30)), prev, 4, earlier_ref=" ".join(prev))
+        segs = ED.cut_list(words, t + random.uniform(0, 1), f, TH)["segments"]
+        assert not ED.cuts_in_silence(words, segs)
+        assert all(a < b for a, b in segs) and all(b0 <= a1 for (_, b0), (a1, _) in zip(segs, segs[1:]))

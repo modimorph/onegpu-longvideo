@@ -257,3 +257,18 @@ def test_setup_cycle_never_repeats_and_bookends_when_possible():
                 r = PL._run_setups(seq, n, book)
                 assert len(r) == n + 1 and all(a != b for a, b in zip(r, r[1:]))
     assert PL._run_setups(["A", "B", "C", "A"], 3, True) == ["A", "B", "C", "A"]
+
+
+def test_planner_fuzz_never_raises_and_keeps_angle_band():
+    import random
+
+    random.seed(3)
+    vocab = ("the model card speech clip plan camera colour voice two three only then now so but here look remember years "
+             "you get quiet ... — [cough] um, you'd, you'd größe café 42 3.5 % : ( ) don't").split()
+    for _ in range(200):
+        prof = profiles.load(random.choice(profiles.names()))
+        clips = [PL.Clip(i + 1, "c", random.choice([3, 7.5, 10, 15, 16, 29.96, 61]),
+                         [PL.Line(t, t) for t in [" ".join(random.choice(vocab) for _ in range(random.randint(0, 20)))
+                                                  for _ in range(random.randint(0, 5))]]) for i in range(random.randint(1, 20))]
+        p = PL.plan(PL.Script("t", clips, {"language": random.choice(["English", "German"])}, {}), prof)
+        assert not p["angles"]["errors"]
