@@ -89,5 +89,25 @@ class OLVProfileStep:
         return (m,)
 
 
-NODE_CLASS_MAPPINGS = {"OLVProfileStep": OLVProfileStep}
-NODE_DISPLAY_NAME_MAPPINGS = {"OLVProfileStep": "OLV profile one sampler step"}
+class OLVSink:
+    """Output node that accepts anything and does nothing (times a sub-graph such as the conditioning alone)."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"value": ("*",)}}
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, input_types):
+        return True
+
+    RETURN_TYPES = ()
+    OUTPUT_NODE = True
+    FUNCTION = "run"
+    CATEGORY = "onegpu/measure"
+
+    def run(self, value):
+        torch.cuda.synchronize()
+        return {}
+
+
+NODE_CLASS_MAPPINGS = {"OLVProfileStep": OLVProfileStep, "OLVSink": OLVSink}
+NODE_DISPLAY_NAME_MAPPINGS = {"OLVProfileStep": "OLV profile one sampler step", "OLVSink": "OLV sink (measurement)"}
