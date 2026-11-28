@@ -263,14 +263,15 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
         wt.join()
         enc.wait()
         dec_killed = False
+        dec_hung = False
         if reof.is_set():  # normal end: wait for the decoder's own exit status instead of killing it
             try:
                 dec.wait(timeout=30)
             except subprocess.TimeoutExpired:
-                dec_killed = True
+                dec_hung = True  # closed its stream but did not exit: treated as a failure below
         else:
             dec_killed = dec.poll() is None  # cancellation (error or early stop): kill is expected, status ignored
-        if dec_killed or dec.poll() is None:
+        if dec_killed or dec_hung or dec.poll() is None:
             dec.kill()
         dec.wait()
         torch.backends.cudnn.benchmark = cudnn_prev
@@ -278,7 +279,7 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
         raise RuntimeError(f"upscale writer failed: {werr[0]!r}") from werr[0]
     if rerr:
         raise RuntimeError(f"upscale reader failed: {rerr[0]!r}") from rerr[0]
-    if dec.returncode and not dec_killed:
+    if dec_hung or (dec.returncode and not dec_killed):
         raise RuntimeError(f"upscale decoder exited with code {dec.returncode}: input {inp} was not fully read")
     if enc.returncode:
         raise RuntimeError(f"upscale encoder exited with code {enc.returncode}: output {out} is not valid")
