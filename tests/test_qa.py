@@ -105,3 +105,27 @@ def test_british_and_american_spellings_match(uk, us):
     from onegpu_longvideo.qa import wer
     assert wer.normalize(uk) == wer.normalize(us)
     assert wer.normalize("promise") == ["promise"] and wer.normalize("our hour") == ["our", "hour"]
+
+
+
+def test_room_review_message_puts_reference_first():
+    from onegpu_longvideo.qa import stage2
+    m = stage2.build_room_message(b"REF", [(1.5, b"F1"), (2.0, b"F2")], {"kinds": ["step"]})
+    c = m[0]["content"]
+    assert "same_room" in c[0]["text"] and "step" in c[0]["text"]
+    assert c[1]["type"] == "image_url" and c[2]["text"] == "t=1.50 s" and len(c) == 6
+
+
+def test_background_compare_flags_a_new_object():
+    cv2 = pytest.importorskip("cv2")
+    from onegpu_longvideo.qa import background as B
+    rng = np.random.default_rng(0)
+    ref = (rng.random((B.H, B.W, 3)) * 60 + 100).astype(np.uint8)
+    ref = cv2.GaussianBlur(ref, (5, 5), 0)
+    same = ref.copy()
+    lamp = ref.copy()
+    lamp[60:200, 10:110] = (230, 200, 150)          # a bright new object at the left
+    bg = np.ones((B.H, B.W), bool)
+    a, b = B.compare(same, ref, bg), B.compare(lamp, ref, bg)
+    assert a["ssim"] > 0.99 and a["cell_ssim"] > 0.99
+    assert b["cell_ssim"] < 0.3 and B.where(b["cell"]).endswith("left")
