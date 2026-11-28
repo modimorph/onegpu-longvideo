@@ -383,21 +383,30 @@ def _pick_joins(nj: int, want: int, open_k: int, gap: int, book: bool, shift) ->
 
 
 def _run_setups(seq: list[str], n_changes: int, book: bool) -> list[str]:
-    """Set-up per run of clips: cycle through the sequence, never the same set-up twice in a row; bookend = last run is seq[0]."""
-    runs = [seq[0]]
-    i = 0
-    for r in range(1, n_changes + 1):
-        if book and r == n_changes:
-            if runs[-1] == seq[0]:                       # the run before the bookend must not already be A
-                runs[-1] = next(x for x in seq if x != seq[0] and (len(runs) < 2 or x != runs[-2]))
-            runs.append(seq[0])
-            break
-        i += 1
-        nxt = seq[i % len(seq)]
-        while nxt == runs[-1]:
+    """Set-up per run of clips: cycle through the sequence, never the same set-up twice in a row.
+    With `book`, the last run returns to seq[0] when the set-ups allow it (with only two set-ups and an odd number of
+    changes it cannot: then the cycle simply continues)."""
+    runs, i = [seq[0]], 0
+
+    def nxt(avoid: set[str]) -> str:
+        nonlocal i
+        for _ in range(2 * len(seq)):
             i += 1
-            nxt = seq[i % len(seq)]
-        runs.append(nxt)
+            x = seq[i % len(seq)]
+            if x not in avoid:
+                return x
+        for x in seq:                      # fall back: anything that is a change
+            if x != runs[-1]:
+                return x
+        return runs[-1]
+
+    for r in range(1, n_changes + 1):
+        if book and r == n_changes and runs[-1] != seq[0]:
+            runs.append(seq[0])
+        elif book and r == n_changes - 1:
+            runs.append(nxt({runs[-1], seq[0]}))   # keep seq[0] free for the bookend
+        else:
+            runs.append(nxt({runs[-1]}))
     return runs
 
 
@@ -420,9 +429,13 @@ def angle_plan(script: Script, prof: dict) -> dict:
     choice: tuple = ()
     if want > 0 and ap["mode"] != "none":
         open_k = min(max(1, ap["min_open_clips"]), nj)
-        for w in range(want, 0, -1):            # fewer changes only if no placement fits at all
-            for gap in range(ap["min_clips_between"], 0, -1):
-                choice = _pick_joins(nj, w, open_k, gap, ap["bookend"] and w >= 2, shift)
+        # relax in this order: the gap between changes, then the opening hold, and only then the number of changes
+        for w in range(want, 0, -1):
+            for ok in range(open_k, 0, -1):
+                for gap in range(ap["min_clips_between"], 0, -1):
+                    choice = _pick_joins(nj, w, ok, gap, ap["bookend"] and w >= 2, shift)
+                    if choice:
+                        break
                 if choice:
                     break
             if choice:

@@ -199,7 +199,8 @@ def test_markdown_three_column_table(tmp_path):
     assert [ln.text for ln in PL.load_script(md).clips[0].lines] == ["First line here.", "Second line here."]
 
 
-@pytest.mark.parametrize("n,sec,prof", [(12, 30, "talking_head"), (40, 30, "talking_head"), (2, 15, "ad"), (1, 400, "talking_head")])
+@pytest.mark.parametrize("n,sec,prof", [(12, 30, "talking_head"), (40, 30, "talking_head"), (2, 15, "ad"), (1, 400, "talking_head"),
+                                         (3, 61, "talking_head"), (5, 15, "tutorial"), (7, 10, "cinematic_short")])
 def test_angle_plan_scales_and_stays_in_band(n, sec, prof):
     import time
 
@@ -247,3 +248,12 @@ def test_calibrate_reports_measured_rate(tmp_path):
     y.write_text(PL.calibration_profile(cal, "talking_head"))
     prof = profiles.load(str(y))
     assert prof["planner"]["speech"]["wps"][1] < 2.8 and prof["planner"]["gestures"]["rest"].startswith("rests both hands")
+
+
+def test_setup_cycle_never_repeats_and_bookends_when_possible():
+    for seq in (["A", "B", "C", "A"], ["A", "B", "A", "B"], ["A", "B"]):
+        for n in range(7):
+            for book in (True, False):
+                r = PL._run_setups(seq, n, book)
+                assert len(r) == n + 1 and all(a != b for a, b in zip(r, r[1:]))
+    assert PL._run_setups(["A", "B", "C", "A"], 3, True) == ["A", "B", "C", "A"]
