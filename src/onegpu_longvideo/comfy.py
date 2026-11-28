@@ -82,6 +82,8 @@ class ComfyClient:
             item = main[0]
         else:
             item, raws, out = first_output(h), [], {}
+        if raw_dest is not None and not raws:  # check before writing anything, so no new main file sits beside an old raw take
+            raise RuntimeError("raw take requested but the graph has no in-graph upscale node output with a *_raw.mp4")
         path = self.download(item, dest)
         res = {"prompt_id": pid, "file": str(path), "exec_s": exec_seconds(h), "remote_file": item["filename"]}
         cached = set()
@@ -90,9 +92,7 @@ class ComfyClient:
                 cached.update(m[1].get("nodes", []))
         if out.get("olv_upscale_s") and up_ids[0] not in cached:  # a cached node reports an old run's time
             res["upscale_in_graph_s"] = out["olv_upscale_s"][0]
-        if raw_dest is not None and up_ids:
-            if not raws:
-                raise RuntimeError("raw take requested but the in-graph upscale node saved none")
+        if raw_dest is not None:
             res["raw_file"] = str(self.download(raws[0], raw_dest))
         return res
 

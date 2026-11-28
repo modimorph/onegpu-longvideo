@@ -39,9 +39,10 @@ def test_cached_node_reports_no_upscale_time(tmp_path, monkeypatch):
 
 def test_missing_raw_take_fails(tmp_path, monkeypatch):
     h = {"status": {"completed": True, "messages": MSG}, "outputs": {"save": {"images": [UP]}}}
-    c, _ = client(monkeypatch, h)
+    c, calls = client(monkeypatch, h)
     with pytest.raises(RuntimeError, match="raw take"):
         c.run(G, tmp_path / "a.mp4", raw_dest=tmp_path / "a_raw.mp4")
+    assert calls == []  # nothing written before the check
 
 
 def test_plain_graph_without_raw_dest(tmp_path, monkeypatch):
@@ -52,3 +53,11 @@ def test_plain_graph_without_raw_dest(tmp_path, monkeypatch):
     res = c.run({"save": {"class_type": "SaveVideo", "inputs": {}}}, tmp_path / "a.mp4")
     assert "raw_file" not in res and res["remote_file"] == "a.mp4"
     assert calls == [("a.mp4", str(tmp_path / "a.mp4"))]
+
+
+def test_raw_dest_needs_the_upscale_node(tmp_path, monkeypatch):
+    h = {"status": {"completed": True, "messages": []}, "outputs": {"save": {"images": [UP, RAW]}}}
+    c, calls = client(monkeypatch, h)
+    with pytest.raises(RuntimeError, match="raw take"):
+        c.run({"save": {"class_type": "SaveVideo", "inputs": {}}}, tmp_path / "a.mp4", raw_dest=tmp_path / "a_raw.mp4")
+    assert calls == []
