@@ -233,3 +233,19 @@ def test_captions_burned_and_srt_written(tmp_path):
     assert qa["captions"]["burned"] and (tmp_path / "o" / "captions.srt").read_text().startswith("1\n00:00:00,")
     assert "subtitles=" in " ".join(qa["ffmpeg_assemble"]), qa["ffmpeg_assemble"]
     assert qa["titles"]["lower_third"] and not any("skipped" in w for w in qa.get("warnings", []))
+
+
+@pytest.mark.skipif(not HAS_FF, reason="needs ffmpeg")
+def test_word_check_after_cuts_passes_when_the_cut_removes_a_replay(tmp_path):
+    from onegpu_longvideo.qa import wer as WER
+
+    ref = "we made one long shot today and it held"
+    heard = _w("we made one long shot we made one long shot today and it held", t=0.1, d=0.12, gap=0.05)
+    _clip2(tmp_path / "clip1" / "video.mp4", seed=6)
+    r = WER.score(ref, [WER.Word(w["w"], w["t0"], w["t1"]) for w in heard], 3.0, 5.0)
+    assert max(r["win_wer"]) > 0.03              # before the cut: the replay counts as invented words
+    (tmp_path / "clip1" / "wer.json").write_text(json.dumps({**r, "words": heard}))
+    plan = {"clips": [{"clip": 1, "lines": [ref]}]}
+    qa = ED.edit(tmp_path, plan, TH, tmp_path / "o")
+    assert qa["clips"][0]["cuts"] and qa["final_word_check"]["win_wer"] == [0.0]
+    assert next(g for g in qa["gates"] if g["id"] == "G8")["pass"]

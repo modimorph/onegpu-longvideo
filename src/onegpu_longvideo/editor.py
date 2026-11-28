@@ -508,7 +508,20 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                   f"box=1:boxcolor=black@0.55:boxborderw={int(H * 0.01)}:{en}[vt]")
         vlast = "[vt]"
     qa["titles"] = {"lower_third": bool(title), "title_chars": len(title or "")}
-    cues = caption_cues(final_words(qa, fps), **ed["captions"]["style"])
+    fwords = final_words(qa, fps)
+    cues = caption_cues(fwords, **ed["captions"]["style"])
+    # Word check AFTER the cuts: the per-clip check counts a replayed sentence as invented words, but the cut removes it,
+    # so the film is judged on what is left (and a cut that removed a script word shows up as missing).
+    wc = ed["word_check"]
+    if ref_lines and all(c["clip"] in ref_lines and c.get("_words") for c in qa["clips"]):
+        from .qa import wer as WER
+
+        dur = sum(n for c in qa["clips"] for _, _, n in c["segments_frames"]) / fps
+        fr = WER.score(" ".join(ref_lines[c["clip"]] for c in qa["clips"]), [WER.Word(w["w"], w["t0"], w["t1"]) for w in fwords], dur, wc["window_s"])
+        bad = [w for w in fr["windows"] if w["wer"] > wc["max_window_wer"]]
+        qa["final_word_check"] = {"wer": fr["wer"], "win_wer": fr["win_wer"],
+                                  "failed_windows": [{"window": w["window"], "wer": w["wer"], "invented": w["invented"], "missing": w["missing"],
+                                                      "gibberish": w["invented"] >= wc["gibberish_invented"]} for w in bad]}
     srt = out / "captions.srt"
     if cues:
         write_srt(cues, srt)          # sidecar for the upload page, also when not burned in
@@ -655,7 +668,9 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     join_ok = all(j["dE76"] <= cg["join_dE76_max"] for j in qa.get("colour_joins", []) if j.get("gated", True))
     L = qa["loudness"]["final"]
     gates = [
-        {"id": "G8", "gate": "every 5 s window WER inside the limit (no gibberish)", "pass": not e1["errors"]},
+        {"id": "G8", "gate": "every 5 s window WER inside the limit after the cuts (no gibberish)",
+         "pass": (not qa["final_word_check"]["failed_windows"] and not [e for e in e1["errors"] if e["type"] == "no_wer_file"])
+         if "final_word_check" in qa else not e1["errors"]},
         {"id": "G9", "gate": "no cut inside speech", "pass": not [e for e in errors if e["type"] == "cut_inside_speech"]},
         {"id": "G10", "gate": f"clip dE76 <= {cg['clip_dE76_max']} vs anchor, joins <= {cg['join_dE76_max']}",
          "pass": (col_ok and join_ok) or col["method"] == "none"},
