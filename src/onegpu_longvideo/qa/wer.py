@@ -31,7 +31,10 @@ def align(ref: list[str], hyp: list[str]) -> list[tuple[str, int | None, int | N
     """Levenshtein alignment. Ops: M match, S substitution, D deletion (missing), I insertion (invented).
     Uses the Rust core from native/olv_native when installed (same op list, tests/test_native.py)."""
     if _native is not None:
-        return [tuple(o) for o in _native.align(list(ref), list(hyp))]
+        try:
+            return [tuple(o) for o in _native.align(list(ref), list(hyp))]
+        except UnicodeEncodeError:  # lone surrogates cannot cross into Rust strings: the Python original handles them
+            pass
     return align_py(ref, hyp)
 
 

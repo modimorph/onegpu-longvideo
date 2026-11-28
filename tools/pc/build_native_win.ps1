@@ -6,7 +6,7 @@ $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 $Repo = (Resolve-Path $Repo).Path  # before Push-Location, so relative paths cannot point into native\olv_native
 $t0 = Get-Date
 Push-Location "$Repo\native\olv_native"
-& $Maturin build --release -i $Py -o "$Repo\native\wheels" 2>&1 | Select-Object -Last 2
+& $Maturin build --release --locked -i $Py -o "$Repo\native\wheels" 2>&1 | Select-Object -Last 2
 $rc = $LASTEXITCODE
 Pop-Location
 if ($rc -ne 0) { "maturin build failed ($rc): nothing installed"; exit $rc }

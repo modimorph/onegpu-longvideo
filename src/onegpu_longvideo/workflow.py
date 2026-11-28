@@ -87,9 +87,11 @@ def build(prompt: str, r: Recipe, output_prefix: str = "onegpu/render") -> dict:
     g["adec"] = {"class_type": "VAEDecodeAudio", "inputs": {"samples": ["sample", 0], "vae": ["avae", 0]}}
     if r.upscale_in_graph:  # x2 upscale + encode inside the graph (comfyui_nodes/onegpu_upscale.py): no raw-mp4 round trip
         w, h = (int(v) for v in r.upscale_to)
+        if w < 64 or h < 64:
+            raise ValueError(f"upscale_to {r.upscale_to}: the in-graph upscale node needs at least 64x64")
         g["save"] = {"class_type": "OLVUpscaleVideoSave", "inputs": {"images": ["vdec", 0], "audio": ["adec", 0], "upscale_model": r.upscale_model,
                                                                       "width": w, "height": h, "fps": 24.0, "quality": 18,
-                                                                      "filename_prefix": output_prefix + "_1080p", "save_raw": True}}
+                                                                      "filename_prefix": output_prefix + f"_{h}p", "save_raw": True}}
         return g
     g["video"] = {"class_type": "CreateVideo", "inputs": {"fps": 24, "images": ["vdec", 0], "audio": ["adec", 0]}}
     g["save"] = {"class_type": "SaveVideo", "inputs": {"filename_prefix": output_prefix, "format": "auto", "codec": "auto", "video": ["video", 0]}}

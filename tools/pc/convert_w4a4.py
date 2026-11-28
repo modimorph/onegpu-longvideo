@@ -115,7 +115,7 @@ def bench_one(f, qmods, dev, M=16384, linear_dtype="int4"):
     def rel(y):  # chunked so no full fp32 copy of the [M, N] output is live
         num = sum(((y[i:i + 2048].float() - ref[i:i + 2048].float()) ** 2).sum().item() for i in range(0, M, 2048))
         den = sum((ref[i:i + 2048].float() ** 2).sum().item() for i in range(0, M, 2048))
-        return round((num / den) ** 0.5, 5)
+        return round((num / den) ** 0.5, 5) if den > 0 else None  # undefined for an all-zero reference
     return {"module": m, "shape": [M, q.shape[1], q.shape[0]], "ms_bf16": t(lambda: torch.nn.functional.linear(x, w)),
             "ms_int8": t(lambda: torch.nn.functional.linear(x, w8)), "ms_w4a4": t(lambda: torch.nn.functional.linear(x, w4)),
             "rel_err_int8_vs_bf16": rel(y8), "rel_err_w4a4_vs_bf16": rel(y4)}

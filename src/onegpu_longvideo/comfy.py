@@ -71,15 +71,29 @@ class ComfyClient:
     def run(self, graph: dict, dest: str | Path, timeout_s: float = 3600, raw_dest: str | Path | None = None) -> dict:
         pid = self.queue(graph)
         h = self.wait(pid, timeout_s)
-        item = first_output(h)
+        up_ids = [k for k, n in graph.items() if n.get("class_type") == "OLVUpscaleVideoSave"]
+        if up_ids:  # in-graph upscale: take the files from that node only (never a preview of another node)
+            out = h.get("outputs", {}).get(up_ids[0], {})
+            vids = [v for v in out.get("images", []) if str(v.get("filename", "")).endswith(".mp4")]
+            main = [v for v in vids if not v["filename"].endswith("_raw.mp4")]
+            raws = [v for v in vids if v["filename"].endswith("_raw.mp4")]
+            if not main:
+                raise RuntimeError("the in-graph upscale node reported no video file")
+            item = main[0]
+        else:
+            item, raws, out = first_output(h), [], {}
         path = self.download(item, dest)
         res = {"prompt_id": pid, "file": str(path), "exec_s": exec_seconds(h), "remote_file": item["filename"]}
-        for node_out in h.get("outputs", {}).values():  # in-graph upscale: its own seconds and the 720p raw take
-            if node_out.get("olv_upscale_s"):
-                res["upscale_in_graph_s"] = node_out["olv_upscale_s"][0]
-            raws = [v for v in node_out.get("images", []) if str(v.get("filename", "")).endswith("_raw.mp4")]
-            if raws and raw_dest:
-                res["raw_file"] = str(self.download(raws[0], raw_dest))
+        cached = set()
+        for m in h.get("status", {}).get("messages", []):
+            if isinstance(m, list) and len(m) > 1 and m[0] == "execution_cached" and isinstance(m[1], dict):
+                cached.update(m[1].get("nodes", []))
+        if out.get("olv_upscale_s") and up_ids[0] not in cached:  # a cached node reports an old run's time
+            res["upscale_in_graph_s"] = out["olv_upscale_s"][0]
+        if raw_dest is not None and up_ids:
+            if not raws:
+                raise RuntimeError("raw take requested but the in-graph upscale node saved none")
+            res["raw_file"] = str(self.download(raws[0], raw_dest))
         return res
 
 

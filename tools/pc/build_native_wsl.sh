@@ -6,6 +6,6 @@ REPO=$1; PY=$2
 [ -x ~/.cargo/bin/cargo ] || curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
 [ -x ~/olv-maturin/bin/maturin ] || { python3 -m venv ~/olv-maturin && ~/olv-maturin/bin/pip install -q maturin==1.16.0; }
 rm -rf /tmp/olv_native && cp -r "$REPO/native/olv_native" /tmp/olv_native && rm -rf /tmp/olv_native/target
-(cd /tmp/olv_native && PATH=~/.cargo/bin:$PATH ~/olv-maturin/bin/maturin build --release -i "$PY" -o "$REPO/native/wheels")
+(cd /tmp/olv_native && PATH=~/.cargo/bin:$PATH ~/olv-maturin/bin/maturin build --release --locked -i "$PY" -o "$REPO/native/wheels")
 "$PY" -m pip install -q --no-deps --upgrade --target "$REPO/src" "$REPO"/native/wheels/olv_native-*manylinux*.whl
 cd "$REPO" && PYTHONPATH=src "$PY" -c "import olv_native, onegpu_longvideo.qa.wer as w; print('olv_native', olv_native.olv_native.__file__, 'wired', w._native is not None)"

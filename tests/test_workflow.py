@@ -74,3 +74,11 @@ def test_upscale_in_graph_replaces_save():
     assert W.validate(g) == [] and W.uses_custom_nodes(g)
     g2 = W.build("x", R.Recipe(upscale_in_graph=False))
     assert g2["save"]["class_type"] == "SaveVideo"
+
+
+def test_upscale_in_graph_size_and_name():
+    import pytest as _pt
+    g = W.build("x", R.Recipe(upscale_to=[1280, 720]))
+    assert g["save"]["inputs"]["filename_prefix"].endswith("_720p")
+    with _pt.raises(ValueError):
+        W.build("x", R.Recipe(upscale_to=[32, 32]))
