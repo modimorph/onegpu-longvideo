@@ -130,3 +130,16 @@ def test_background_compare_flags_a_new_object():
     assert a["ssim"] > 0.99 and a["cell_ssim"] > 0.99
     # a flat object over texture moves SSIM little (0.96 overall, 0.72 in the worst cell); the edge layout and colour catch it
     assert b["edges"] < 0.55 and b["dE76"] > 4.0 and b["cell_ssim"] < 0.8 and B.where(b["cell"]).endswith("left")
+
+
+
+def test_background_reads_a_still_reference(tmp_path):
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        pytest.skip("needs ffmpeg")
+    from onegpu_longvideo.qa import background as B
+    png = tmp_path / "ref.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=640x360:d=1", "-frames:v", "1", str(png)], check=True)
+    got = list(B.frames(str(png), fps=2))
+    assert len(got) == 1 and got[0][1].shape == (B.H, B.W, 3)

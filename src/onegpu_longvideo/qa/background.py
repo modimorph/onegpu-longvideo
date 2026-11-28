@@ -26,7 +26,13 @@ def frames(path: str, fps: float = 2.0, start: float | None = None, end: float |
     cmd = ["ffmpeg", "-v", "error"] + (["-ss", f"{start:.3f}"] if start else []) + ["-i", path]
     if end is not None:
         cmd += ["-t", f"{end - (start or 0):.3f}"]
-    cmd += ["-vf", f"fps={fps},scale={W}:{H}:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    still = path.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+    # a still image has no frame rate: the fps filter returned no frame at all for a PNG reference (seen on the PC)
+    if still:
+        cmd += ["-vf", f"scale={W}:{H}:flags=area", "-frames:v", "1"]
+    else:
+        cmd += ["-vf", f"fps={fps},scale={W}:{H}:flags=area"]
+    cmd += ["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     i, n = 0, W * H * 3
     while True:
