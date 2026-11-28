@@ -673,7 +673,7 @@ def calibrate(plan_d: dict, words_dir: str | Path, prof: dict) -> dict:
     by_len: dict[float, list] = {}
     for r in rows:
         by_len.setdefault(round(r["seconds"], 1), []).append(r["rate_wps"])
-    from statistics import median    # true median (two clips: their mean, not the faster one)
+    from statistics import median  # true median (two clips: their mean, not the faster one)
 
     med = {k: round(median(v), 2) for k, v in by_len.items()}
     overall = round(median(r["rate_wps"] for r in rows), 2)
