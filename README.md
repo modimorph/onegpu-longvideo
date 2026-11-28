@@ -48,11 +48,12 @@ flowchart LR
 ```bash
 git clone https://github.com/modimorph/onegpu-longvideo && cd onegpu-longvideo
 pip install -e ".[dev]"          # pure-Python parts; tests run on CPU
-pytest -q                        # 72 tests, no GPU (the editor tests need ffmpeg)
+pytest -q                        # 132 tests, no GPU (the editor tests need ffmpeg)
 
 olv graph configs/talking_head_30s.yaml --out graph.json   # build the ComfyUI API graph (no GPU)
 olv lint configs/prompts/podcast_host.txt                  # check a prompt
 olv plan configs/scripts/example_talking_head.yaml --profile talking_head --out plan/   # whole-film plan + prompts
+olv profiles                                               # talking_head, tutorial, podcast, cinematic_short, ad, documentary, variants
 ```
 
 To render you need a ComfyUI install with the MiniMax-H3 nodes and your own model weights:
@@ -103,8 +104,8 @@ Prompt rules that mattered in our runs: continuous speech with no planned silenc
 | `voice` | voice post: sample-exact length, envelope lag per window, WER guard |
 | `camera` | camera-path estimate and plan check |
 | `flow` | `olv flow-check`: validate a run folder against the flow gates |
-| `planner` | `olv plan`: text pass, speech density, angle plan, gesture budget, colour anchor, prompts per clip |
-| `editor` | `olv edit`: word check, cut list, colour match, assembly, loudness, contact sheet, QA gates |
+| `planner` | `olv plan`: text pass, fact sheet, speech density, angle plan, gesture budget, colour anchor, prompts per clip; `olv calibrate`: measured speaking rate vs the plan |
+| `editor` | `olv edit`: word check after cuts, cut list, keyframed colour match per set-up, sample-exact joins, captions, loudness, contact sheet, QA gates |
 | `colour` | Lab statistics, Reinhard transfer as a 3D LUT, dE76 |
 | `profiles` | scenario profiles (`configs/profiles/*.yaml`) merged over the base |
 | `timing` | stage timing log, GPU memory sampler, torch profiler helper |
