@@ -218,7 +218,9 @@ def test_caption_cues_follow_reading_rules():
     # a cue that must break ends at punctuation when there is one in its second half
     w2 = [{"w": w, "t0": i * 0.3, "t1": i * 0.3 + 0.25} for i, w in enumerate(
         "Hi. Quick thing first, I'm generated, and this shot came off one gaming graphics card. No cuts at all.".split())]
-    assert all(re.search(r"[,.?!]$", c["lines"][-1]) for c in ED.caption_cues(w2))
+    c2 = ED.caption_cues(w2)
+    assert all(re.search(r"[,.?!]$", c["lines"][-1]) for c in c2)
+    assert all(len(c["lines"]) == 1 or min(map(len, c["lines"])) > 10 for c in c2)   # balanced lines, no orphan word
 
 
 @pytest.mark.skipif(not HAS_FF, reason="needs ffmpeg")

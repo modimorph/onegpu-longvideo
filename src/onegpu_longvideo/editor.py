@@ -191,9 +191,20 @@ def caption_cues(words: list[dict], max_chars: int = 42, max_lines: int = 2, max
     cues, cur = [], []
 
     def lines_of(ws):
-        out, line = [], ""
-        for w in ws:
-            t = w["w"].strip()
+        toks = [w["w"].strip() for w in ws]
+        text = " ".join(toks)
+        if len(text) <= max_chars:
+            return [text] if text else []
+        # two lines: the split that makes the longer line shortest (balanced, no one-word orphan line)
+        best = None
+        for k in range(1, len(toks)):
+            a, b = " ".join(toks[:k]), " ".join(toks[k:])
+            if len(a) <= max_chars and len(b) <= max_chars and (best is None or max(len(a), len(b)) < max(map(len, best))):
+                best = (a, b)
+        if best:
+            return list(best)
+        out, line = [], ""                 # longer than two lines: greedy fill (the caller then starts a new cue)
+        for t in toks:
             if line and len(line) + 1 + len(t) > max_chars:
                 out.append(line)
                 line = t
