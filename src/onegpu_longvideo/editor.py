@@ -22,11 +22,11 @@ from pathlib import Path
 
 from . import colour as C
 
-FILLERS = {"um", "umm", "uh", "uhh", "erm", "er", "hmm", "mm"}
+FILLERS = {"um", "umm", "uh", "uhh", "erm", "er", "hmm", "mm", "äh", "ähm", "öhm", "euh", "ehm"}
 
 
 def _norm(s: str) -> str:
-    return re.sub(r"[^a-z0-9']", "", s.lower())
+    return re.sub(r"[^\w']|_", "", s.lower())
 
 
 # ---------------------------------------------------------------- inputs
@@ -269,9 +269,22 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
             a, b = c["segments"][0][0], c["segments"][-1][1]
             stats.append(C.lab_stats(list(C.frames_rgb(c["video"], step=col["sample_step"], start=a, end=b))))
         anchor = target or stats[col["anchor_clip"] - 1]
+        rs = col["ramp_s"]
         for c, s in zip(qa["clips"], stats):
             c["colour_before"] = {"stats": s, "dE76_vs_anchor": C.de76(s, anchor)}
-            if c["clip"] == col["anchor_clip"] and not target or C.de76(s, anchor) < col["skip_below_dE"]:
+            a, b = c["segments"][0][0], c["segments"][-1][1]
+            if col["mode"] == "ramp" and b - a > 3 * rs:
+                # Keyframed grade: match the clip's first and last second to the anchor and blend the two LUTs over the clip.
+                # A single mean match left the joins at dE76 1.04 on real clips (they drift inside themselves).
+                s_a = C.lab_stats(list(C.frames_rgb(c["video"], step=2, start=a, end=a + rs)))
+                s_b = C.lab_stats(list(C.frames_rgb(c["video"], step=2, start=b - rs, end=b)))
+                c["colour_before"].update({"start_dE76": C.de76(s_a, anchor), "end_dE76": C.de76(s_b, anchor)})
+                if max(C.de76(s_a, anchor), C.de76(s_b, anchor)) >= col["skip_below_dE"]:
+                    c["cube_a"], c["cube_b"] = str(tmp / f"clip{c['clip']}_a.cube"), str(tmp / f"clip{c['clip']}_b.cube")
+                    C.write_cube(s_a, anchor, c["cube_a"], strength=col["strength"])
+                    C.write_cube(s_b, anchor, c["cube_b"], strength=col["strength"])
+                c["cube"] = None
+            elif c["clip"] == col["anchor_clip"] and not target or C.de76(s, anchor) < col["skip_below_dE"]:
                 c["cube"] = None
             else:
                 c["cube"] = str(tmp / f"clip{c['clip']}.cube")
@@ -287,6 +300,8 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         inputs += ["-i", c["video"]]
         n_frames = int((c.get("duration") or 0) * (c.get("fps") or fps) + 1e-6) if c.get("duration") else None
         c["segments_frames"] = []
+        kept_total = sum(b - a for a, b in c["segments"])
+        kept_off = 0.0
         for a, b in c["segments"]:
             # Sample-exact join: snap both ends to the frame grid, trim video by frame and audio by sample, so every segment's
             # audio lasts exactly frames/fps. Unequal lengths add an audio lead at every join (seen: +48 ms per join).
@@ -303,9 +318,19 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
             # Untagged sources are read as BT.709 TV range (same as the colour stats). Without explicit matrices, concat lets
             # swscale guess per segment, and an untagged clip next to a tagged one shifted by dE76 1.7 (measured).
             vf += f",scale={W}:{H}:flags=lanczos:in_color_matrix=bt709:out_color_matrix=bt709:in_range=tv:out_range=tv,setsar=1,fps={fps}"
-            if c.get("cube"):
-                vf += "," + C.LUT_CHAIN.format(cube=c["cube"])
-            vf += f",format=yuv420p,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv[v{k}]"
+            tags = f"format=yuv420p,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv[v{k}]"
+            if c.get("cube_a"):
+                w = f"clip(({kept_off:.4f}+T)/{kept_total:.4f},0,1)"
+                fc += [vf + f",scale=in_color_matrix=bt709:in_range=tv:out_range=full,format=gbrp,split[sa{k}][sb{k}]",
+                       f"[sa{k}]lut3d=file='{c['cube_a']}':interp=tetrahedral[la{k}]",
+                       f"[sb{k}]lut3d=file='{c['cube_b']}':interp=tetrahedral[lb{k}]"]
+                vf = (f"[la{k}][lb{k}]blend=all_expr='A+(B-A)*{w}',"
+                      f"scale=in_range=full:out_color_matrix=bt709:out_range=tv,{tags}")
+            else:
+                if c.get("cube"):
+                    vf += "," + C.LUT_CHAIN.format(cube=c["cube"])
+                vf += "," + tags
+            kept_off += b - a
             d = (f1 - f0) / fps
             af = (f"[{ci}:a]aresample={sr},aformat=sample_rates={sr}:channel_layouts=stereo,apad,"
                   f"atrim=start_sample={s0}:end_sample={s1},asetpts=PTS-STARTPTS")
@@ -334,8 +359,8 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
            "-c:v", "libx264", "-preset", enc["preset"], "-crf", str(enc["crf"]), "-pix_fmt", "yuv420p",
            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv", "-c:a", "pcm_s16le", str(assembled)]
     qa["ffmpeg_assemble"] = cmd
-    edl = {"segments": [{"clip": c["clip"], "segments": c["segments"], "cuts": c["cuts"], "punch_in": c.get("punch_in"), "lut": bool(c.get("cube"))}
-                        for c in qa["clips"]]}  # frame-exact ranges are added to edit_qa.json (segments_frames)
+    edl = {"segments": [{"clip": c["clip"], "segments": c["segments"], "cuts": c["cuts"], "punch_in": c.get("punch_in"),
+                         "lut": bool(c.get("cube") or c.get("cube_a"))} for c in qa["clips"]]}  # frame-exact ranges are added to edit_qa.json (segments_frames)
     (out / "edl.json").write_text(json.dumps(edl, indent=1))
     if dry_run:
         qa["dry_run"] = True
@@ -410,9 +435,15 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     cols, rows = ed["review"]["contact_sheet"]
     n = cols * rows
     sheet = out / "contact_sheet.jpg"
-    _run(["ffmpeg", "-v", "error", "-y", "-i", str(final), "-vf",
-          f"fps={n}/{fin['duration']:.4f},scale={ed['review']['thumb_width']}:-2,tile={cols}x{rows}:padding=4:margin=4:color=white",
-          "-frames:v", "1", "-q:v", "3", str(sheet)])
+    tw = ed["review"]["thumb_width"]
+    label = f"drawtext=text='%{{pts\\:hms}}':x=6:y=h-th-6:fontsize={max(10, tw // 20)}:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=3,"
+    base = f"fps={n}/{fin['duration']:.4f},scale={tw}:-2,"
+    tile = f"tile={cols}x{rows}:padding=4:margin=4:color=white"
+    try:      # each tile carries its time code so a reviewer can jump to it
+        _run(["ffmpeg", "-v", "error", "-y", "-i", str(final), "-vf", base + label + tile, "-frames:v", "1", "-q:v", "3", str(sheet)])
+    except RuntimeError as e:
+        qa.setdefault("warnings", []).append(f"contact sheet without time codes: {str(e)[-160:]}")
+        _run(["ffmpeg", "-v", "error", "-y", "-i", str(final), "-vf", base + tile, "-frames:v", "1", "-q:v", "3", str(sheet)])
     qa["contact_sheet"] = {"path": str(sheet), "grid": [cols, rows], "frames": n, "t": [round(i * fin["duration"] / n, 2) for i in range(n)]}
 
     # gates

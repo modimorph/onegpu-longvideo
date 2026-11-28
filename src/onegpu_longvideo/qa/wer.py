@@ -19,7 +19,8 @@ class Word:
 
 
 def normalize(s: str) -> list[str]:
-    return re.sub(r"[^a-z0-9' ]+", " ", s.lower().replace("-", " ")).split()
+    """Lower-case words; Unicode letters stay inside one word (an ASCII-only class split "größe" into two tokens)."""
+    return re.sub(r"[^\w' ]+|_", " ", s.lower().replace("-", " ")).split()
 
 
 def align(ref: list[str], hyp: list[str]) -> list[tuple[str, int | None, int | None]]:

@@ -33,7 +33,7 @@ def test_all_profiles_load_and_differ():
     ("the speech [cough] starts to slip.", "The speech starts to slip.", "cough"),
     ("heading for an hour... well, nearly an hour.", "Heading for an hour.", "self_correction"),
     ("so um this is it.", "So this is it.", "filler"),
-    ("we stopped -- then went on.", "We stopped. Then went on.", "fake_stop"),
+    ("we stopped... then went on.", "We stopped. Then went on.", "fake_stop"),
 ])
 def test_fake_actions_fixed(raw, clean, kind):
     out, kinds = PL.fix_fake_actions(raw, TH["planner"]["banned_actions"])
@@ -149,3 +149,63 @@ def test_speaker_rest_overrides_profile():
     s = _script(1, 10, [["Quiet line one here.", "Quiet line two here."]])
     s.speaker["rest"] = "keeps both hands on the steering wheel"
     assert all(r["wording"] == "keeps both hands on the steering wheel" or r["type"] != "rest" for r in PL.gesture_plan(s, TH)["lines_plan"])
+
+
+def test_non_english_words_stay_whole_and_fillers_go():
+    assert PL.norm_words("Größe und Qualität") == ["größe", "und", "qualität"]
+    out, kinds = PL.fix_fake_actions("Äh, das ist ganz einfach.", TH["planner"]["banned_actions"], "German")
+    assert out == "Das ist ganz einfach." and "filler" in kinds
+    s = _script(1, 10, [["Hallo zusammen."]])
+    s.speaker["language"] = "German"
+    assert any(w["type"] == "speech_band_untested_language" for w in PL.density(s, TH)["warnings"])
+
+
+
+@pytest.mark.parametrize("text", [
+    "No, actually, it works on every card.", "I know that that is true.", "She had had enough of slow renders.",
+    "The model works (breathing room matters).", "Check the (laughter track) setting.", "Use e.g. a still frame.",
+    "Did you know, the card has enough memory?", "Very very fast.",
+])
+def test_normal_english_is_not_changed(text):
+    assert PL.fix_fake_actions(text, TH["planner"]["banned_actions"]) == (text, [])
+
+
+def test_ellipsis_keeps_the_words_after_it():
+    out, _ = PL.fix_fake_actions("We waited... now we ship it today.", TH["planner"]["banned_actions"])
+    assert out == "We waited. Now we ship it today."
+    assert PL.fix_fake_actions("The model — trained on reels — works.", TH["planner"]["banned_actions"])[0] == "The model, trained on reels, works."
+    assert PL.fix_fake_actions("Er sagte, es geht.", TH["planner"]["banned_actions"], "German") == ("Er sagte, es geht.", [])
+
+
+def test_repeat_inside_one_line_and_stage_direction_lines():
+    hits = PL.repeated_runs([("l1", "We made one long shot on one card, and we made one long shot on one card.")], 5)
+    assert hits
+    s = _script(1, 10, [["Hello there, friends of the show.", "[laughs]", "We start right now with the plan."]])
+    PL.text_pass(s, TH)
+    assert len(s.clips[0].lines) == 2
+
+
+def test_yaml_lines_with_colons_and_booleans(tmp_path):
+    y = tmp_path / "s.yaml"
+    y.write_text("clip_seconds: 10\nclips:\n  - seconds: 20\n    lines:\n      - Step one: open the app\n      - yes\n")
+    s = PL.load_script(y)
+    assert [ln.text for ln in s.clips[0].lines] == ["Step one: open the app", "yes"] and s.clips[0].seconds == 20
+    assert PL.load_script(y, clip_seconds=10).clips[0].seconds == 10      # --clip-seconds overrides per-clip seconds
+
+
+def test_markdown_three_column_table(tmp_path):
+    md = tmp_path / "s.md"
+    md.write_text("## Segment 1 (0-10 s): A\n\n| # | t | line |\n|---|---|---|\n| 1 | 0.3-4 | First line here. |\n| 2 | 4-8 | Second line here. |\n")
+    assert [ln.text for ln in PL.load_script(md).clips[0].lines] == ["First line here.", "Second line here."]
+
+
+@pytest.mark.parametrize("n,sec,prof", [(12, 30, "talking_head"), (40, 30, "talking_head"), (2, 15, "ad"), (1, 400, "talking_head")])
+def test_angle_plan_scales_and_stays_in_band(n, sec, prof):
+    import time
+
+    clips = [PL.Clip(i + 1, "c", sec, [PL.Line(f"topic{i} words about topic{i} here{i}.")]) for i in range(n)]
+    t = time.time()
+    a = PL.angle_plan(PL.Script("t", clips), profiles.load(prof))
+    assert time.time() - t < 2 and not a["errors"], (a["band"], a["changes"])
+    seq = [r["setup"] for r in a["clips"]]
+    assert all(not r["change_from_prev"] or seq[i] != seq[i - 1] for i, r in enumerate(a["clips"]))

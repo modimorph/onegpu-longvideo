@@ -75,3 +75,8 @@ def test_av_offset():
 def test_merge_windows():
     w = D.merge_windows([{"t_start": 1, "t_end": 2}, {"t_start": 2.2, "t_end": 3}, {"t": 10}], pad_s=0.5, max_len_s=3)
     assert w[0] == (0.5, 3.5) and w[-1] == (9.5, 10.5) and all(b - a <= 3 for a, b in w)
+
+
+def test_normalize_keeps_unicode_words():
+    from onegpu_longvideo.qa import wer
+    assert wer.normalize("Größe, naïve café") == ["größe", "naïve", "café"]
