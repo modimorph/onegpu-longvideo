@@ -47,7 +47,7 @@ flowchart LR
 ```bash
 git clone https://github.com/modimorph/onegpu-longvideo && cd onegpu-longvideo
 pip install -e ".[dev]"          # pure-Python parts; tests run on CPU
-pytest -q                        # 49 tests, no GPU
+pytest -q                        # 52 tests, no GPU
 
 olv graph configs/talking_head_30s.yaml --out graph.json   # build the ComfyUI API graph (no GPU)
 olv lint configs/prompts/podcast_host.txt                  # check a prompt
@@ -57,7 +57,7 @@ To render you need a ComfyUI install with the MiniMax-H3 nodes and your own mode
 
 1. Get the weights yourself and accept each licence (see "Models and licences"). File names go in the recipe under `models:`.
 2. Copy `comfyui_nodes/onegpu_nodes.py` and `comfyui_nodes/onegpu_upscale.py` into `ComfyUI/custom_nodes/` and restart ComfyUI (or set `ffn_chunk_tokens: 0` and `upscale_in_graph: false`).
-3. Start ComfyUI, then:
+3. Start ComfyUI with the flags in `configs/comfyui_flags.txt` (`--fast fp16_accumulation`; `tools/pc/serve_comfy.ps1` does it on Windows). The default video VAE is the int8 decoder `minimax_h3_video_vae_int8_convrot.safetensors` (ComfyUI >= 0.36); set `models: {video_vae: minimax_h3_video_vae_fp16.safetensors}` if you only have the fp16 file. With `upscale_in_graph: true` (default) `olv render` writes `<name>_1080p.mp4` and `<name>_raw.mp4`, so the `olv upscale` line below is only for `upscale_in_graph: false`. Then:
 
 ```bash
 export COMFY_URL=http://127.0.0.1:8188
