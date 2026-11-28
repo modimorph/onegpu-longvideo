@@ -272,14 +272,16 @@ def density(script: Script, prof: dict) -> dict:
         avail = max(0.1, t1 - t0)
         words = sum(len(ln.text.split()) for ln in c.lines)
         band = [math.ceil(lo * avail), math.floor(hi * avail)]
-        est_last = t0 + words / sp["wps_nominal"]
-        # line timings at the nominal rate (used for the prompt time codes)
+        # The clip is spoken continuously, so estimate at the clip's own rate clamped into the band (a fixed nominal rate made
+        # in-band scripts fail the deadline: 36 words in a 33-37 band ran to 13.6 s against 13.3 s).
+        rate = min(hi, max(lo, words / avail))
+        est_last = t0 + words / rate
         t, times = t0, []
         for ln in c.lines:
-            d = len(ln.text.split()) / sp["wps_nominal"]
+            d = len(ln.text.split()) / rate
             times.append([round(t, 2), round(t + d, 2)])
             t += d
-        row = {"clip": c.idx, "seconds": c.seconds, "words": words, "band": band, "wps": round(words / avail, 2),
+        row = {"clip": c.idx, "seconds": c.seconds, "words": words, "band": band, "wps": round(words / avail, 2), "rate_used": round(rate, 2),
                "first_word_s": t0, "deadline_s": round(t1, 2), "est_last_word_s": round(est_last, 2), "line_times": times}
         rows.append(row)
         if not band[0] <= words <= band[1]:
@@ -363,7 +365,9 @@ def angle_plan(script: Script, prof: dict) -> dict:
 
 # ---------------------------------------------------------------- P4 gesture budget
 def gesture_plan(script: Script, prof: dict) -> dict:
-    gp = prof["planner"]["gestures"]
+    gp = dict(prof["planner"]["gestures"])
+    if script.speaker.get("rest"):        # the scene knows its props: "keeps both hands on the steering wheel"
+        gp["rest"] = script.speaker["rest"]
     types = gp["types"]
     n_lines = sum(len(c.lines) for c in script.clips)
     max_total = round(gp["density"] * n_lines)

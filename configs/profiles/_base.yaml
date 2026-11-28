@@ -35,7 +35,7 @@ planner:
     min_gap_s: 40              # same gesture type at least 40 s apart
     finger_max: 2              # finger or thumb shapes in the whole film (R-GE2)
     finger_types: [count_fingers, small_gap]
-    rest: "rests both hands on the desk and stays still"
+    rest: "keeps both hands relaxed and still"   # override per script with speaker.rest (the scene knows its props)
     types:
       greeting:      {budget: 1, cue: "^(hi|hello|hey)\\b|thanks for watching", wording: "gives a small wave with the right hand"}
       count_fingers: {budget: 1, cue: "\\b(two|three|four) (problems|things|steps|reasons|parts|ways|takes)\\b", wording: "briefly holds up {n} fingers of the right hand"}
@@ -51,7 +51,7 @@ planner:
   prompt:
     trigger: ""
     picture_chain: "<Picture 3> is the last moment of the previous shot, colour-matched to the anchor grade: continue in exactly this pose, light and framing."
-    picture_setup: "<Picture 3> is the framing reference for camera set-up {setup}: same person and room, seen from this camera."
+    picture_setup: "<Picture 3> is the framing reference for camera set-up {setup}: same person and place, seen from this camera."
     camera_tail: "The camera is fixed on a tripod and the framing stays the same for the whole shot, one continuous take."
 editor:
   word_check: {window_s: 5, max_window_wer: 0.03, gibberish_invented: 2}   # R-ED1

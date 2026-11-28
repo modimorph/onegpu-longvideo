@@ -4,3 +4,5 @@
 description: "Talking-head explainer (YouTube style)"
 planner:
   hook: {first_line_by_s: 5}        # say what the video covers within about 5 s (R-HK1)
+  gestures:
+    rest: "rests both hands on the desk and stays still"

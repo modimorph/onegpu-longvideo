@@ -16,7 +16,15 @@ planner:
       A: "tight frontal close-up, eyes to the lens, product in hand near the face"
       B: "medium shot at eye level, chest up, eyes to the lens"
       C: "close-up of the product in hand, the face soft in the background"
-  gestures: {density: 0.5}
+  gestures:
+    density: 0.5
+    rest: "holds the product steady near the face"
+    finger_types: []
+    types:   # product gestures (replaces the base list, see _replace)
+      show_product: {budget: 2, cue: "\\b(this|it|bottle|product|look)\\b", wording: "lifts the product toward the lens"}
+      point_lens:   {budget: 1, cue: "\\b(you|your|yours|get)\\b", wording: "points the free hand at the lens"}
+      nod:          {budget: 1, cue: "\\b(still|really|all day|yes)\\b", wording: "nods once with a small smile"}
+_replace: [planner.gestures.types]
 editor:
   cuts: {tail_pad_s: 0.15}
   titles: {lower_third: true, start_s: 0.5, hold_s: 3.0, captions: true}

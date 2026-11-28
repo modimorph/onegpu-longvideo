@@ -14,7 +14,16 @@ planner:
       A: "waist-up medium shot, the subject sits slightly off-centre and looks just past the lens toward an unseen interviewer"
       B: "close-up from the same side, head and shoulders, for emphasis"
       C: "wider shot showing the subject in their place of work"
-  gestures: {density: 0.35}
+  gestures:
+    density: 0.35
+    rest: "keeps the hands relaxed in the lap and stays still"
+    finger_types: [small_gap]
+    types:   # small interview gestures (replaces the base list, see _replace)
+      look_off:       {budget: 2, cue: "\\b(remember|years|ago|started|used to|passed)\\b", wording: "glances off to the side for a moment, remembering"}
+      open_palm:      {budget: 2, cue: "\\b(people|truth|mostly|really|honestly)\\b", wording: "turns one open palm up and holds it for a beat"}
+      small_gap:      {budget: 1, cue: "\\b(little|small|tiny|only)\\b", wording: "holds a small gap between thumb and index finger"}
+      hands_together: {budget: 2, cue: "\\b(quiet|calm|listen|listening|sound)\\b", wording: "brings the hands together and sits still"}
+_replace: [planner.gestures.types]
 editor:
   pacing: {max_shot_s: 40}
   titles: {lower_third: true, start_s: 1.5, hold_s: 4.0}

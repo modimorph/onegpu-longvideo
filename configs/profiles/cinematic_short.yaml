@@ -18,6 +18,13 @@ planner:
   gestures:
     density: 0.3
     rest: "stays in the moment, small natural movement only"
+    finger_types: []
+    types:   # story actions instead of presenter gestures (replaces the base list, see _replace)
+      look_away: {budget: 2, cue: "\\b(remember|years|ago|used to|father|mother|never)\\b", wording: "looks away into the distance for a moment"}
+      turn_to:   {budget: 2, cue: "\\b(look|see|there|now|light)\\b", wording: "slowly turns the head toward the light"}
+      step:      {budget: 1, cue: "\\b(walk|go|leave|left|arrive|come)\\b", wording: "takes one slow step forward"}
+      breath:    {budget: 1, cue: "\\b(cold|tired|wait|waiting|alone)\\b", wording: "lets out a slow breath"}
+_replace: [planner.gestures.types]
 editor:
   cuts: {internal: false}
   titles: {lower_third: false}

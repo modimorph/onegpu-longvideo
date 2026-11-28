@@ -1,0 +1,13 @@
+# Example script for `olv plan --profile ad`: a 15 s spot as 2 clips x 7.5 s. Band per clip at 2.8-3.2 words/s: 17-19 words.
+# The key message lands in the first 3 s (first line ends by about 3 s).
+title: Example ad spot
+clip_seconds: 7.5
+speaker: {tag: S1, role: the presenter, language: English, voice_ref: true,
+          description: "The presenter, a cheerful person in their twenties in a bright yellow hoodie, talks straight to the lens with energy."}
+scene: {refs: "<Picture 1> is the identity reference for the presenter (S1). <Picture 2> is the product: a matte black water bottle.",
+        description: "A sunny kitchen with white tiles and a plant on the counter; the presenter holds the bottle near the face.", sound: "Bright room tone; no music."}
+clips:
+  - title: Hook
+    lines: ["This bottle keeps your water cold all day.", "I filled it at seven this morning. Still icy."]
+  - title: Call to action
+    lines: ["No sweat on the outside, no metal taste inside.", "Get yours today, and stay cold anywhere you go."]

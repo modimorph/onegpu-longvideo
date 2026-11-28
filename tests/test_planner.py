@@ -124,3 +124,28 @@ def test_fact_sheet_catches_contradicted_claims(tmp_path):
     p = PL.plan(s, TH)
     assert not next(g for g in p["gates"] if g["id"] == "G2F")["pass"]
     assert "Fact sheet" in PL.llm_review_request(s, p["text_pass"])
+
+
+@pytest.mark.parametrize("profile,script", [("talking_head", "example_talking_head"), ("tutorial", "example_tutorial"),
+                                            ("podcast", "example_podcast"), ("cinematic_short", "example_cinematic"),
+                                            ("ad", "example_ad"), ("documentary", "example_documentary")])
+def test_every_profile_example_passes(profile, script):
+    prof = profiles.load(profile)
+    p = PL.plan(PL.load_script(ROOT / "configs" / "scripts" / f"{script}.yaml"), prof)
+    assert p["gates_pass"], [g for g in p["gates"] if not g["pass"]]
+    text = " ".join(x["prompt"] for x in p["prompts"])
+    if profile != "talking_head":
+        assert "hands on the desk" not in text, "talking-head rest wording leaked into another profile"
+    for r in p["density"]["clips"]:   # in band implies on time (G3 and G4 agree)
+        assert r["est_last_word_s"] <= r["deadline_s"] + 1e-6
+
+
+def test_profile_replace_drops_base_gestures():
+    assert "count_fingers" not in profiles.load("cinematic_short")["planner"]["gestures"]["types"]
+    assert "count_fingers" in profiles.load("podcast")["planner"]["gestures"]["types"]
+
+
+def test_speaker_rest_overrides_profile():
+    s = _script(1, 10, [["Quiet line one here.", "Quiet line two here."]])
+    s.speaker["rest"] = "keeps both hands on the steering wheel"
+    assert all(r["wording"] == "keeps both hands on the steering wheel" or r["type"] != "rest" for r in PL.gesture_plan(s, TH)["lines_plan"])
