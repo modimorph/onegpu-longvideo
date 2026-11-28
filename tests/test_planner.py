@@ -315,3 +315,14 @@ def test_punch_profile_gives_each_setup_its_own_crop():
     scales = {r["setup"]: r["punch_scale"] for r in a["clips"]}
     assert scales["A"] is None and scales["B"] != scales["C"] and not a["setup_refs"]
     assert all(r["picture3"] != "new set-up: no last-frame chaining; the set-up reference still is the framing picture" for r in a["clips"])
+
+
+
+def test_seed_only_chain_uses_one_picture():
+    prof = profiles.load("talking_head_punch_seed")
+    s = PL.load_script(EXAMPLE)
+    p = PL.plan(s, prof)
+    assert p["gates_pass"]
+    first, second = p["prompts"][0]["prompt"], p["prompts"][1]["prompt"]
+    assert "<Picture 2>" in first and "<Picture 2>" not in second and "<Picture 1> is the last moment of the previous shot" in second
+    assert p["prompts"][1]["pictures"] and p["prompts"][0]["pictures"] is None

@@ -200,6 +200,10 @@ def main(argv=None):
     s.add_argument("--no-captions", dest="captions", action="store_false", help="do not burn captions in (captions.srt is still written)")
     s.add_argument("--no-wer", action="store_true", help="allow clips without wer.json (G8 then only covers checked clips)"); s.set_defaults(fn=cmd_edit)
     s = sub.add_parser("profiles", help="list scenario profiles"); s.set_defaults(fn=cmd_profiles)
+    s = sub.add_parser("bgcheck", help="background consistency of a clip vs a reference clip or image (needs opencv + mediapipe)")
+    s.add_argument("video"); s.add_argument("reference"); s.add_argument("--fps", type=float, default=2.0); s.add_argument("--out")
+    s.set_defaults(fn=lambda a: __import__("onegpu_longvideo.qa.background", fromlist=["main"]).main(
+        [a.video, a.reference, "--fps", str(a.fps)] + (["--out", a.out] if a.out else [])))
     s = sub.add_parser("calibrate", help="measured speaking rate of rendered clips vs the plan; suggests a speech band")
     s.add_argument("plan"); s.add_argument("words_dir", help="folder with clipN.json word times or clipN.wer.json files")
     s.add_argument("--profile"); s.add_argument("--write-profile", help="write a profile YAML (extends the plan's profile) with the suggested band")

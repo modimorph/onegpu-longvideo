@@ -568,13 +568,19 @@ def build_prompts(script: Script, prof: dict, dens: dict, angles: dict, gestures
     for i, c in enumerate(script.clips):
         a = angles["clips"][i]
         parts = []
-        if script.scene.get("refs"):
-            parts.append(script.scene["refs"].strip())
-        if i > 0:
-            if a["change_from_prev"] and angles["mode"] == "generate":
-                parts.append(pp["picture_setup"].format(setup=a["setup"]))
-            elif not a["change_from_prev"] or angles["mode"] != "generate":
-                parts.append(pp["picture_chain"])
+        seed_only = i > 0 and pp.get("chain_refs") == "seed_only" and not (a["change_from_prev"] and angles["mode"] == "generate")
+        if seed_only:
+            # one reference that agrees with itself: with a separate identity still and room plate the model built the room
+            # from those for the first ~4.7 s and then jumped to the chained frame (measured on the 1-min, ISSUES B66)
+            parts.append(pp["picture_seed_only"])
+        else:
+            if script.scene.get("refs"):
+                parts.append(script.scene["refs"].strip())
+            if i > 0:
+                if a["change_from_prev"] and angles["mode"] == "generate":
+                    parts.append(pp["picture_setup"].format(setup=a["setup"]))
+                else:
+                    parts.append(pp["picture_chain"])
         if sp.get("description"):
             parts.append(sp["description"].strip())
         if script.scene.get("description"):
@@ -589,7 +595,8 @@ def build_prompts(script: Script, prof: dict, dens: dict, angles: dict, gestures
                         end_silence_s=prof["planner"]["speech"]["end_margin_s"], voice_ref=bool(sp.get("voice_ref", True)))
         text = P.build(scene, c.seconds, trigger=pp.get("trigger") or None)
         problems = P.lint(text, c.seconds, max_wps=prof["planner"]["speech"]["lint_max_wps"])
-        out.append({"clip": c.idx, "seconds": c.seconds, "prompt": text, "words": len(text.split()), "lint": problems})
+        out.append({"clip": c.idx, "seconds": c.seconds, "prompt": text, "words": len(text.split()), "lint": problems,
+                    "pictures": ["previous clip last frame (colour-matched)"] if seed_only else None})
     return out
 
 
