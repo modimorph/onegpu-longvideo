@@ -603,9 +603,10 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         from .qa import wer as WER
 
         dur = sum(n for c in qa["clips"] for _, _, n in c["segments_frames"]) / fps
-        fr = WER.score(" ".join(ref_lines[c["clip"]] for c in qa["clips"]), [WER.Word(w["w"], w["t0"], w["t1"]) for w in fwords], dur, wc["window_s"])
+        fr = WER.score(" ".join(ref_lines[c["clip"]] for c in qa["clips"]), [WER.Word(w["w"], w["t0"], w["t1"]) for w in fwords], dur, wc["window_s"],
+                       aliases=plan.get("asr_aliases"))
         bad = [w for w in fr["windows"] if w["wer"] > wc["max_window_wer"]]
-        qa["final_word_check"] = {"wer": fr["wer"], "win_wer": fr["win_wer"],
+        qa["final_word_check"] = {"wer": fr["wer"], "win_wer": fr["win_wer"], "aliases_used": fr.get("aliases_used", []),
                                   "failed_windows": [{"window": w["window"], "wer": w["wer"], "invented": w["invented"], "missing": w["missing"],
                                                       "gibberish": w["invented"] >= wc["gibberish_invented"]} for w in bad]}
     srt = out / "captions.srt"

@@ -165,3 +165,13 @@ def test_joined_name_splits_into_script_words():
     from onegpu_longvideo.qa import wer
     heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("The repo is onegpulongvideo on GitHub.".split())]
     assert wer.score("The repo is one GPU long video on GitHub.", heard, 5.0)["wer"] == 0
+
+
+
+def test_asr_alias_for_a_brand_name_is_explicit_and_logged():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("It runs in confi UI on the card.".split())]
+    ref = "It runs in ComfyUI on the card."
+    assert wer.score(ref, heard, 5.0)["wer"] > 0                      # without the alias: an error
+    r = wer.score(ref, heard, 5.0, aliases={"confi ui": "ComfyUI", "confiui": "ComfyUI"})
+    assert r["wer"] == 0 and r["aliases_used"] == [{"heard": "confi ui", "as": "ComfyUI", "t": 1.2}]

@@ -127,7 +127,8 @@ def align(ref: list[str], hyp: list[str]) -> list[tuple[str, int | None, int | N
     return ops
 
 
-def score(reference_text: str, heard: list[Word], duration_s: float, window_s: float = 5.0) -> dict:
+def score(reference_text: str, heard: list[Word], duration_s: float, window_s: float = 5.0, aliases: dict | None = None) -> dict:
+    """aliases: {"heard form": "script form"} for names an ASR cannot spell (an explicit, logged project decision)."""
     ref = normalize(reference_text)
     hw = [Word(t, w.start, w.end, w.prob) for w in heard for t in normalize(w.text)]
     # numbers split across ASR words ("10" "80" for "ten-eighty") join like the reference does
@@ -149,6 +150,22 @@ def score(reference_text: str, heard: list[Word], duration_s: float, window_s: f
         parts = _word_break(w.text, vocab | spelled) if w.text not in vocab and len(w.text) > 6 else None
         split += [Word(t, w.start, w.end, w.prob) for t in _numbers(parts)] if parts else [w]
     hw = split
+    used = []
+    for heard_form, script_form in (aliases or {}).items():      # e.g. "confi ui" -> "ComfyUI"
+        src, dst = normalize(heard_form), normalize(script_form)
+        if not src or not dst:
+            continue
+        out, i = [], 0
+        while i < len(hw):
+            if [w.text for w in hw[i:i + len(src)]] == src:
+                a, b = hw[i], hw[i + len(src) - 1]
+                out += [Word(t, a.start, b.end, a.prob) for t in dst]
+                used.append({"heard": heard_form, "as": script_form, "t": round(a.start, 2)})
+                i += len(src)
+            else:
+                out.append(hw[i])
+                i += 1
+        hw = out
     hyp = [w.text for w in hw]
     ops = align(ref, hyp)
     errs, ref_t = [], []
@@ -176,7 +193,8 @@ def score(reference_text: str, heard: list[Word], duration_s: float, window_s: f
                      "wer": round(len(sel) / max(1, nref), 3)})
     return {"wer": round(len(errs) / max(1, len(ref)), 3), "n_ref": len(ref), "n_hyp": len(hyp),
             "windows": wins, "win_wer": [w["wer"] for w in wins], "errors": errs,
-            "first_word_s": round(hw[0].start, 2) if hw else None, "last_word_s": round(hw[-1].end, 2) if hw else None}
+            "first_word_s": round(hw[0].start, 2) if hw else None, "last_word_s": round(hw[-1].end, 2) if hw else None,
+            "aliases_used": used}
 
 
 def passes(result: dict, max_window_wer: float = 0.03) -> bool:

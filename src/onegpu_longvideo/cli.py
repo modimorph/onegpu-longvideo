@@ -78,7 +78,8 @@ def cmd_wer(a):
                  for x in json.loads(Path(a.words).read_text())]
     else:
         heard = wer.transcribe(a.audio, model=a.model)
-    res = wer.score(ref, heard, a.seconds)
+    aliases = dict(x.split("=", 1) for x in (a.alias or []))
+    res = wer.score(ref, heard, a.seconds, aliases=aliases)
     res["pass"] = wer.passes(res, a.max_window_wer)
     res["words"] = [{"w": w.text.strip(), "t0": round(w.start, 3), "t1": round(w.end, 3), "p": round(w.prob, 3)} for w in heard]  # olv edit reads these
     print(json.dumps({k: v for k, v in res.items() if k not in ("errors", "words")}))
@@ -182,6 +183,7 @@ def main(argv=None):
     s.add_argument("audio"); s.add_argument("reference"); s.add_argument("--seconds", type=float, default=29.96)
     s.add_argument("--model", default="large-v3-turbo"); s.add_argument("--max-window-wer", type=float, default=0.03); s.add_argument("--out")
     s.add_argument("--words", help="JSON word times from another ASR run; skips transcription (audio may be '-')")
+    s.add_argument("--alias", action="append", help="'heard form=script form' for a name the ASR cannot spell (logged in the output)")
     s.set_defaults(fn=cmd_wer)
     s = sub.add_parser("camera", help="estimate the camera move and compare with the plan")
     s.add_argument("video"); s.add_argument("--plan", choices=["push", "pull", "arc", "slide", "locked"]); s.set_defaults(fn=cmd_camera)

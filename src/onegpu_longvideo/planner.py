@@ -49,6 +49,7 @@ class Script:
     speaker: dict = field(default_factory=dict)   # tag, role, description, language, voice_ref
     scene: dict = field(default_factory=dict)     # refs, description, sound
     facts: list = field(default_factory=list)     # fact sheet: [{id, keywords, allowed, forbid, note}]
+    asr_aliases: dict = field(default_factory=dict)   # {"heard form": "script form"} for names the ASR cannot spell
 
 
 # ---------------------------------------------------------------- input
@@ -125,7 +126,7 @@ def load_script(path: str | Path, clip_seconds: float | None = None, scene_path:
             lines = [_line(x, i) for x in c["lines"]]
             secs = float(clip_seconds) if clip_seconds else float(c.get("seconds", default_s))   # --clip-seconds overrides all
             clips.append(Clip(i, str(c.get("title", f"clip {i}")), secs, lines, c.get("side", "")))
-        return Script(d.get("title", p.stem), clips, d.get("speaker", {}), d.get("scene", {}), d.get("facts", []))
+        return Script(d.get("title", p.stem), clips, d.get("speaker", {}), d.get("scene", {}), d.get("facts", []), d.get("asr_aliases", {}))
     clips = _segments_md(txt, clip_seconds)
     if not clips:
         raise ValueError(f"no clips found in {p}: use the YAML format or '## Segment N (t0-t1 s): title' tables")
@@ -628,7 +629,7 @@ def plan(script: Script, prof: dict, anchor_still: str | None = None) -> dict:
     return {"version": 1, "film": film, "gates": gates, "gates_pass": all(g["pass"] for g in gates),
             "text_pass": tp, "density": dens, "angles": angles, "gestures": gestures, "color": colour,
             "clips": [{"clip": c.idx, "title": c.title, "seconds": c.seconds, "lines": [ln.text for ln in c.lines]} for c in script.clips],
-            "prompts": prompts}
+            "prompts": prompts, "asr_aliases": script.asr_aliases}
 
 
 def write(plan_d: dict, out_dir: str | Path) -> Path:
