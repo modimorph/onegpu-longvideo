@@ -1,0 +1,30 @@
+# Cinematic short: story first, sparse dialogue, a new shot at every clip join (each clip is one shot).
+# Murch rule of six: emotion and story outrank rhythm and eye-trace when choosing a cut (R-ED5); keep the 180-degree line and
+# change angle by at least 30 degrees at a cut (R-AN3). Shots: establishing wide, medium, close-up.
+description: "Cinematic short (story, sparse dialogue)"
+planner:
+  speech: {wps: [1.2, 2.8], wps_nominal: 2.4, end_margin_s: 2.0}
+  hook: {first_line_by_s: 15}
+  angles:
+    changes_per_3min: [9, 18]
+    min_open_clips: 1
+    min_clips_between: 1
+    bookend: false
+    sequence: [A, B, C, B, A, C, B, C, A, B, C, A]
+    setups:
+      A: "wide establishing shot, the whole set visible, characters small in frame, eye level"
+      B: "medium shot, waist up, 30 degrees off the axis of the previous shot, same side of the action line"
+      C: "close-up on the face, shallow depth of field, same side of the action line"
+  gestures:
+    density: 0.3
+    rest: "stays in the moment, small natural movement only"
+    finger_types: []
+    types:   # story actions instead of presenter gestures (replaces the base list, see _replace)
+      look_away: {budget: 2, cue: "\\b(remember|years|ago|used to|father|mother|never)\\b", wording: "looks away into the distance for a moment"}
+      turn_to:   {budget: 2, cue: "\\b(look|see|there|now|light)\\b", wording: "slowly turns the head toward the light"}
+      step:      {budget: 1, cue: "\\b(walk|go|leave|left|arrive|come)\\b", wording: "takes one slow step forward"}
+      breath:    {budget: 1, cue: "\\b(cold|tired|wait|waiting|alone)\\b", wording: "lets out a slow breath"}
+_replace: [planner.gestures.types]
+editor:
+  cuts: {internal: false}
+  titles: {lower_third: false}

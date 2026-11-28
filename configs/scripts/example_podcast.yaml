@@ -1,0 +1,20 @@
+# Example script for `olv plan --profile podcast`: 2 clips x 29.96 s. Band per clip at 2.6-3.0 words/s: 73-83 words.
+title: Example podcast opener
+clip_seconds: 29.96
+speaker: {tag: S1, role: the host, language: English, voice_ref: true,
+          description: "The host, a person in their thirties in a dark knit sweater with headphones around the neck, speaks warmly and casually."}
+scene: {refs: "<Picture 1> is the identity reference for the host (S1). <Picture 2> is the reference for the studio.",
+        description: "A small podcast studio with acoustic foam panels, a warm desk lamp and a microphone on a boom arm.", sound: "Close, warm voice in a treated room; no music."}
+clips:
+  - title: Open
+    lines:
+      - "Welcome back to the show, everyone. This week we talk about sleep, and why most of us still get it wrong."
+      - "I tracked my own nights for a month, and the results surprised me more than I expected."
+      - "The short version is simple: the hour before bed matters more than the hour you wake up."
+      - "But the details are where it gets interesting, so stay with me for a few more minutes today."
+  - title: First point
+    lines:
+      - "Here is the first thing I noticed. On nights with screens in bed, I fell asleep a lot later than usual."
+      - "Not by a little, either. It was close to forty minutes later on average, every single week."
+      - "That alone changed how I plan my evenings, and honestly, it was the easiest habit I have ever fixed."
+      - "So tonight, try this: put the phone in another room and read a paper book instead, just for one week."

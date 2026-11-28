@@ -49,3 +49,21 @@ def ask(messages: list[dict], url: str | None = None, model: str = "local", max_
 
 def visual_flags(flags: list[dict]) -> list[dict]:
     return [f for f in flags if f.get("type") not in AUDIO_ONLY]
+
+
+ROOM_PROMPT = ("Image 1 is the REFERENCE room. The other images are frames of a generated clip (time stamps given). The person may move; "
+               "ignore the person. Is the room identical to the reference? List every difference: an object added, removed or moved "
+               "(lamp, window, plant, chair, shelf, desk items), a wall or light change, a second copy of an object. "
+               "Answer JSON only: {\"same_room\": true|false, \"differences\": [{\"what\": \"...\", \"where\": \"left|centre|right\", "
+               "\"t_start\": s, \"t_end\": s}]}.")
+
+
+def build_room_message(reference_jpg: bytes, frames: list[tuple[float, bytes]], evidence: dict | None = None) -> list[dict]:
+    """Stage-2 room check: the reference room image first, then the flagged frames (from qa.background findings)."""
+    text = ROOM_PROMPT + (f" Detector evidence: {json.dumps(evidence)}." if evidence else "")
+    content: list[dict] = [{"type": "text", "text": text},
+                           {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(reference_jpg).decode()}}]
+    for t, jpg in frames:
+        content.append({"type": "text", "text": f"t={t:.2f} s"})
+        content.append({"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(jpg).decode()}})
+    return [{"role": "user", "content": content}]
