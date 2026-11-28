@@ -602,6 +602,9 @@ def plan(script: Script, prof: dict, anchor_still: str | None = None) -> dict:
 def write(plan_d: dict, out_dir: str | Path) -> Path:
     out = Path(out_dir)
     (out / "prompts").mkdir(parents=True, exist_ok=True)
+    for old in (out / "prompts").glob("clip*.txt"):   # a re-plan with fewer clips must not leave stale prompts behind
+        if re.fullmatch(r"clip\d+(\.lines)?\.txt", old.name):
+            old.unlink()
     for p in plan_d["prompts"]:
         (out / "prompts" / f"clip{p['clip']}.txt").write_text(p["prompt"] + "\n")
         (out / "prompts" / f"clip{p['clip']}.lines.txt").write_text(" ".join(next(c["lines"] for c in plan_d["clips"] if c["clip"] == p["clip"])) + "\n")

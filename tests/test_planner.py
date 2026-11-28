@@ -217,3 +217,12 @@ def test_varied_rest_variant_extends_talking_head():
     s = _script(1, 29.96, [[f"Neutral line number {i} here." for i in range(6)]])
     rests = [r["wording"] for r in PL.gesture_plan(s, v)["lines_plan"] if r["type"] == "rest"]
     assert all(a != b for a, b in zip(rests, rests[1:]))
+
+
+def test_replan_with_fewer_clips_removes_stale_prompts(tmp_path):
+    PL.write(PL.plan(PL.load_script(EXAMPLE), TH), tmp_path)
+    (tmp_path / "prompts" / "clip9.txt").write_text("stale")
+    (tmp_path / "prompts" / "notes.txt").write_text("keep me")
+    PL.write(PL.plan(PL.load_script(ROOT / "configs" / "scripts" / "example_ad.yaml"), profiles.load("ad")), tmp_path)
+    names = sorted(x.name for x in (tmp_path / "prompts").iterdir())
+    assert names == ["clip1.lines.txt", "clip1.txt", "clip2.lines.txt", "clip2.txt", "notes.txt"]
