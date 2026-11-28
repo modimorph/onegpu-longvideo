@@ -80,6 +80,17 @@ def _spell(w: str) -> str:
     return w
 
 
+def _word_break(tok: str, vocab: set[str]) -> list[str] | None:
+    """Split tok into 2+ vocabulary words (dynamic programming), or None."""
+    best: list[list[str] | None] = [[]] + [None] * len(tok)
+    for i in range(1, len(tok) + 1):
+        for j in range(max(0, i - 20), i):
+            if best[j] is not None and tok[j:i] in vocab:
+                best[i] = best[j] + [tok[j:i]]
+                break
+    return best[-1] if best[-1] and len(best[-1]) >= 2 else None
+
+
 def normalize(s: str) -> list[str]:
     """Lower-case words; Unicode letters stay inside one word (an ASCII-only class split "größe" into two tokens);
     numbers in one form (digits): "fifteen" and "15" match, "10%" and "ten percent" match, "1,080" = "1080"."""
@@ -130,6 +141,14 @@ def score(reference_text: str, heard: list[Word], duration_s: float, window_s: f
         else:
             merged.append(w)
     hw = merged
+    # names the ASR writes as one word ("onegpulongvideo" for "one GPU long video"): split into script words when it can
+    vocab = set(ref)
+    spelled = {w for w, i in _UNITS.items() if str(i) in vocab}     # "1" in the script was "one" before normalising
+    split: list[Word] = []
+    for w in hw:
+        parts = _word_break(w.text, vocab | spelled) if w.text not in vocab and len(w.text) > 6 else None
+        split += [Word(t, w.start, w.end, w.prob) for t in _numbers(parts)] if parts else [w]
+    hw = split
     hyp = [w.text for w in hw]
     ops = align(ref, hyp)
     errs, ref_t = [], []

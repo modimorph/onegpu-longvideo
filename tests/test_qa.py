@@ -158,3 +158,10 @@ def test_split_tens_and_half_match():
     from onegpu_longvideo.qa import wer
     heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("Attention was 80 7 percent, about 3.5 times faster.".split())]
     assert wer.score("Attention was eighty-seven percent, about three and a half times faster.", heard, 5.0)["wer"] == 0
+
+
+
+def test_joined_name_splits_into_script_words():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("The repo is onegpulongvideo on GitHub.".split())]
+    assert wer.score("The repo is one GPU long video on GitHub.", heard, 5.0)["wer"] == 0
