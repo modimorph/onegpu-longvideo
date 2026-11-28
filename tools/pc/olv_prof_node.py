@@ -42,7 +42,7 @@ class OLVProfileStep:
     def patch(self, model, step, out_dir):
         m = model.clone()
         prev = m.model_options.get("model_function_wrapper")
-        state = {"n": 0, "walls": []}
+        state = {"n": 0}
         os.makedirs(out_dir, exist_ok=True)
 
         def call(apply_model, args):
@@ -50,36 +50,53 @@ class OLVProfileStep:
                 return prev(apply_model, args)
             return apply_model(args["input"], args["timestep"], **args["c"])
 
+        def block_hooks(dm):
+            """record_function ranges per DiT block, so kernels can be attributed to blocks in the chrome trace."""
+            hs = []
+            blocks = getattr(dm, "blocks", None) or []
+            for i, b in enumerate(blocks):
+                ctx = {}
+                def pre(mod, a, i=i, ctx=ctx):
+                    ctx["r"] = torch.profiler.record_function(f"block_{i}").__enter__()
+                hs.append(b.register_forward_pre_hook(pre))
+                hs.append(b.register_forward_hook(lambda mod, a, o, ctx=ctx: ctx.pop("r").__exit__(None, None, None)))
+            return hs
+
         def wrapper(apply_model, args):
             k = state["n"]; state["n"] += 1
+            if k != step:  # untraced calls: no syncs, no timing (they must stay unperturbed)
+                return call(apply_model, args)
             torch.cuda.synchronize(); t0 = time.perf_counter()
-            if k != step:
-                out = call(apply_model, args)
-                torch.cuda.synchronize(); state["walls"].append(round(time.perf_counter() - t0, 3))
-                json.dump({"walls": state["walls"]}, open(os.path.join(out_dir, "walls.json"), "w"))
-                return out
+            dm = getattr(m.model, "diffusion_model", None)
+            hs = block_hooks(dm) if dm is not None else []
             acts = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA]
-            with torch.profiler.profile(activities=acts, record_shapes=False, with_stack=False) as prof:
-                out = call(apply_model, args)
-                torch.cuda.synchronize()
+            try:
+                with torch.profiler.profile(activities=acts, record_shapes=True, with_stack=False) as prof:
+                    out = call(apply_model, args)
+                    torch.cuda.synchronize()
+            finally:
+                for h in hs:
+                    h.remove()
             wall = time.perf_counter() - t0
-            state["walls"].append(round(wall, 3))
-            ev = [e for e in prof.key_averages() if getattr(e, "self_device_time_total", 0) > 0]
-            ev.sort(key=lambda e: e.self_device_time_total, reverse=True)
-            buckets, total = {}, 0.0
-            for e in ev:
-                us = e.self_device_time_total; total += us
-                b = _bucket(e.key); buckets[b] = buckets.get(b, 0.0) + us
+            # device-side events only (kernels and copies): no double counting with operator rows
+            dev = [e for e in prof.events() if getattr(e, "device_type", None) is not None and "CUDA" in str(e.device_type)]
+            buckets, total, h2d_n = {}, 0.0, 0
+            names = {}
+            for e in dev:
+                us = e.time_range.elapsed_us(); total += us
+                b = _bucket(e.name); buckets[b] = buckets.get(b, 0.0) + us
+                names[e.name] = names.get(e.name, 0.0) + us
+                if b == "memcpy_h2d":
+                    h2d_n += 1
+            top = sorted(names.items(), key=lambda kv: -kv[1])[:60]
             with open(os.path.join(out_dir, f"step{k}_kernels.txt"), "w", encoding="utf-8") as f:
-                f.write(f"wall {wall:.3f} s, CUDA self total {total / 1e6:.3f} s, kernels {len(ev)}\n")
-                for e in ev[:80]:
-                    f.write(f"{e.self_device_time_total / 1e3:10.1f} ms  {e.count:6d}x  [{_bucket(e.key)}]  {e.key[:160]}\n")
-            info = {"step": k, "wall_s": round(wall, 3), "cuda_busy_s": round(total / 1e6, 3),
-                    "idle_s": round(wall - total / 1e6, 3),
+                f.write(f"wall {wall:.3f} s, device-event sum {total / 1e6:.3f} s (kernels + copies, all streams), events {len(dev)}\n")
+                for nme, us in top:
+                    f.write(f"{us / 1e3:10.1f} ms  [{_bucket(nme)}]  {nme[:160]}\n")
+            info = {"step": k, "wall_s": round(wall, 3), "device_sum_s": round(total / 1e6, 3),
                     "buckets_s": {b: round(v / 1e6, 3) for b, v in sorted(buckets.items(), key=lambda x: -x[1])},
-                    "x_shape": list(args["input"].shape) if hasattr(args["input"], "shape") else None,
-                    "max_alloc_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2),
-                    "reserved_gb": round(torch.cuda.memory_reserved() / 1e9, 2)}
+                    "h2d_copies": h2d_n, "x_shape": list(args["input"].shape) if hasattr(args["input"], "shape") else None,
+                    "max_alloc_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2)}
             json.dump(info, open(os.path.join(out_dir, f"step{k}_summary.json"), "w"), indent=1)
             try:
                 prof.export_chrome_trace(os.path.join(out_dir, f"step{k}_trace.json"))
