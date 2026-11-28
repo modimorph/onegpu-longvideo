@@ -306,3 +306,12 @@ def test_llm_review_speaks_openai_chat_format(tmp_path, monkeypatch):
     assert seen["path"] == "/v1/chat/completions" and seen["auth"] == "Bearer test-key" and seen["body"]["model"] == "writer"
     assert "Script:" in seen["body"]["messages"][0]["content"]
     assert (tmp_path / "text_review.md").read_text().startswith("clip 1 line 2")
+
+
+def test_punch_profile_gives_each_setup_its_own_crop():
+    topics = ["graphics card render speed", "invented words problem memory", "fix tiles attention cache",
+              "voice lips timing", "quality seeds review", "repo open try"]
+    a = PL.angle_plan(_script(6, 29.96, [[f"{t} sentence about {t}."] for t in topics]), profiles.load("talking_head_punch"))
+    scales = {r["setup"]: r["punch_scale"] for r in a["clips"]}
+    assert scales["A"] is None and scales["B"] != scales["C"] and not a["setup_refs"]
+    assert all(r["picture3"] != "new set-up: no last-frame chaining; the set-up reference still is the framing picture" for r in a["clips"])

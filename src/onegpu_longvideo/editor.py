@@ -341,6 +341,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     plan = plan or {}
     ref_lines = {c["clip"]: " ".join(c["lines"]) for c in plan.get("clips", [])}
     punch = {a["clip"]: a.get("punch_in", False) for a in plan.get("angles", {}).get("clips", [])}
+    punch_scale = {a["clip"]: a.get("punch_scale") for a in plan.get("angles", {}).get("clips", [])}
     qa: dict = {"profile": prof["name"], "clips": [], "_sync_tol_ms": ed["sync"]["max_offset_ms"]}
 
     # E1
@@ -364,7 +365,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         prev_tokens = [_norm(w["w"]) for w in words][-40:]
         c["_words"] = words
         qa["clips"].append({**c, **info, "flaws": [{"kind": f["kind"], "t0": words[f["i0"]]["t0"], "t1": words[f["i1"] - 1]["t1"]} for f in flaws],
-                            **cl, "punch_in": punch.get(c["clip"], False)})
+                            **cl, "punch_in": punch.get(c["clip"], False), "punch_scale": punch_scale.get(c["clip"])})
 
     empty = [c["clip"] for c in qa["clips"] if not c["segments"]]
     if empty:
@@ -462,7 +463,8 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
             c["segments_frames"].append([f0, f1, n_out])
             vf = f"[{ci}:v]trim=start_frame={f0}:end_frame={f1},setpts=PTS-STARTPTS"
             if c.get("punch_in"):
-                vf += f",crop=iw/{z}:ih/{z}"
+                zc = c.get("punch_scale") or z
+                vf += f",crop=iw/{zc}:ih/{zc}"
             # Untagged sources are read as BT.709 TV range (same as the colour stats); other shapes are letterboxed.
             vf += (f",scale={W}:{H}:flags=lanczos:force_original_aspect_ratio=decrease:in_color_matrix=bt709:out_color_matrix=bt709:"
                    f"in_range=tv:out_range=tv,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
@@ -641,17 +643,19 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
             s = C.lab_stats(list(C.frames_rgb(str(final), step=col["sample_step"], start=a, end=b)))
             ref = c["anchor_stats"]
             if c.get("punch_in"):    # compare a punched-in clip with the SAME centre crop of its anchor, not the full frame
-                if "v" not in crop_anchor:
+                zc = c.get("punch_scale") or z
+                if zc not in crop_anchor:
                     src = qa["clips"][a_idx]
-                    crop_anchor["v"] = C.lab_stats(list(C.frames_rgb(str(final), step=col["sample_step"], start=pos[a_idx][0],
-                                                                     end=pos[a_idx][1], crop=z))) if not src.get("punch_in") else None
-                ref = crop_anchor["v"] or ref
+                    crop_anchor[zc] = C.lab_stats(list(C.frames_rgb(str(final), step=col["sample_step"], start=pos[a_idx][0],
+                                                                    end=pos[a_idx][1], crop=zc))) if not src.get("punch_in") else None
+                ref = crop_anchor[zc] or ref
             c["colour_after"] = {"stats": s, "dE76_vs_anchor": C.de76(s, ref), "vs": "crop of anchor" if c.get("punch_in") else f"set-up {c['setup']} anchor"}
         joins = []
         for (a0, b0), (a1, b1), c0, c1 in zip(pos, pos[1:], qa["clips"], qa["clips"][1:]):
             x = C.lab_stats(list(C.frames_rgb(str(final), step=1, start=max(a0, b0 - 0.5), end=b0)))
             y = C.lab_stats(list(C.frames_rgb(str(final), step=1, start=a1, end=min(b1, a1 + 0.5))))
-            framing = c0["setup"] != c1["setup"] or bool(c0.get("punch_in")) != bool(c1.get("punch_in"))
+            framing = (c0["setup"] != c1["setup"] or bool(c0.get("punch_in")) != bool(c1.get("punch_in"))
+                       or c0.get("punch_scale") != c1.get("punch_scale"))
             joins.append({"join": f"{c0['clip']}->{c1['clip']}", "t": round(a1, 2), "dE76": C.de76(x, y),
                           "gated": not framing, "note": "framing change: mean colour differs by content, not gated" if framing else ""})
         qa["colour_joins"] = joins

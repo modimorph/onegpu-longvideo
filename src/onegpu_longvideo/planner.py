@@ -462,7 +462,9 @@ def angle_plan(script: Script, prof: dict) -> dict:
         else:
             pic = "same set-up: chain the colour-corrected last frame of the previous clip"
         rows.append({"clip": c.idx, "setup": s, "text": text, "change_from_prev": changed, "picture3": pic,
-                     "punch_in": ap["mode"] == "punch_in" and s != seq[0]})
+                     "punch_in": ap["mode"] == "punch_in" and s != seq[0],
+                     # each punch-in set-up gets its own crop, so B -> C is a visible change too
+                     "punch_scale": (ap.get("punch_scales") or {}).get(s) if ap["mode"] == "punch_in" and s != seq[0] else None})
         prev = s
     n_changes = sum(r["change_from_prev"] for r in rows)
     refs = {}
