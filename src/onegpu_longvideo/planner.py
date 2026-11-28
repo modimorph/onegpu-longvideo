@@ -586,7 +586,12 @@ def build_prompts(script: Script, prof: dict, dens: dict, angles: dict, gestures
         if script.scene.get("description"):
             parts.append(script.scene["description"].strip())
         framing = a["text"] if angles["mode"] == "generate" else angles["clips"][0]["text"]
-        parts.append(f"The camera frames {role} in a {framing}.")
+        if seed_only:
+            # a framing sentence ("medium close-up, chest up") made chained clips re-frame 1.15x closer at every join
+            # (3-min clip 2 vs clip 1, ORB similarity scale 1.15 from the first frame); the picture sets the framing instead
+            parts.append(pp["framing_seed_only"])
+        else:
+            parts.append(f"The camera frames {role} in a {framing}.")
         parts.append(pp["camera_tail"])
         times = dens["clips"][i]["line_times"]
         gl = [g for g in gestures["lines_plan"] if g["clip"] == c.idx]

@@ -326,6 +326,7 @@ def test_seed_only_chain_uses_one_picture():
     first, second = p["prompts"][0]["prompt"], p["prompts"][1]["prompt"]
     assert "<Picture 2>" in first and "<Picture 2>" not in second and "<Picture 1> is the last moment of the previous shot" in second
     assert p["prompts"][1]["pictures"] and p["prompts"][0]["pictures"] is None
+    assert "chest up" in first and "chest up" not in second and "no zoom" in second   # framing comes from the picture
 
 
 

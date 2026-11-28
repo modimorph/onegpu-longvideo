@@ -57,6 +57,7 @@ planner:
     picture_setup: "<Picture 3> is the framing reference for camera set-up {setup}: same person and place, seen from this camera."
     chain_refs: all          # all = identity still + room plate + chained frame; seed_only = the chained frame alone (A/B variant)
     picture_seed_only: "<Picture 1> is the last moment of the previous shot: the same person, clothes, room, light and framing. Continue from exactly this frame; keep every object in the room where it is."
+    framing_seed_only: "The framing is exactly the framing of Picture 1: the same camera distance, height and width of view, no zoom in or out."
     camera_tail: "The camera is fixed on a tripod and the framing stays the same for the whole shot, one continuous take."
 editor:
   word_check: {window_s: 5, max_window_wer: 0.03, gibberish_invented: 2}   # R-ED1
