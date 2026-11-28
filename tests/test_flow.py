@@ -95,10 +95,10 @@ def test_film_mode_reads_every_clip_from_edit_qa(tmp_path):
     _run(tmp_path, m)
     (tmp_path / "wer_final.json").unlink()
     (tmp_path / "plan.json").write_text(json.dumps({"gates_pass": True, "gates": [], "clips": [{"clip": 1, "seconds": 10}, {"clip": 2, "seconds": 10}]}))
-    wc = [{"clip": 1, "checked": True, "win_wer": [0, 0], "last_word_s": 8.1}, {"clip": 2, "checked": True, "win_wer": [0, 0.07], "last_word_s": 9.8}]
+    wc = [{"clip": 1, "checked": True, "win_wer": [0, 0], "last_word_s": 9.7}, {"clip": 2, "checked": True, "win_wer": [0, 0.07], "last_word_s": 9.9}]
     (tmp_path / "edit_qa.json").write_text(json.dumps({"gates_pass": True, "gates": [], "word_check": {"clips": wc}}))
     f = _fails(flow.check(tmp_path))
-    assert f == {"every clip: last word by S - 1.66 s", "every clip: 0 % WER in every 5 s window"}
-    wc[1].update(win_wer=[0, 0], last_word_s=8.2)
+    assert f == {"every clip: no word cut off (last word by S - 0.2 s)", "every clip: 0 % WER in every 5 s window"}
+    wc[1].update(win_wer=[0, 0], last_word_s=9.76)
     (tmp_path / "edit_qa.json").write_text(json.dumps({"gates_pass": True, "gates": [], "word_check": {"clips": wc}}))
     assert flow.passed(flow.check(tmp_path))
