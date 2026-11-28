@@ -30,6 +30,9 @@ class Recipe:
     frames: int = 0  # 0 = derived from seconds
     seed: int = 7329
     steps: int = 8
+    # Track R (native-r): optional step subset on the model's trained 32-interval grid, e.g. [0, 4, 8, 16, 24, 28, 32] = 6 steps.
+    # Empty = BasicScheduler "simple" with `steps`. Sigma of grid index i = shift*t / (1 + (shift-1)*t), t = 1 - i/32.
+    grid_steps: list[int] = field(default_factory=list)
     sampler: str = "euler"
     guidance: float = 1.0  # 1.0 = BasicGuider (no unconditional pass)
     shift_video: float = 12.0
@@ -56,8 +59,22 @@ class Recipe:
             self.frames = frames_for_seconds(self.seconds)
         if self.width % 32 or self.height % 16:
             raise ValueError(f"size {self.width}x{self.height}: width must be a multiple of 32, height of 16")
+        if self.grid_steps:
+            g = [int(i) for i in self.grid_steps]
+            if g[0] != 0 or g[-1] != 32 or any(b <= a for a, b in zip(g, g[1:])):
+                raise ValueError(f"grid_steps {g}: must rise strictly from 0 to 32")
+            self.grid_steps = g
+            self.steps = len(g) - 1
         if self.attention not in ("vsa", "dense", "sage"):
             raise ValueError(f"attention must be vsa, dense or sage, not {self.attention!r}")
+
+    def manual_sigmas(self) -> list[float]:
+        """Shifted video sigmas for grid_steps (ManualSigmas input); the DiT derives the audio schedule itself."""
+        out = []
+        for i in self.grid_steps:
+            t = 1.0 - i / 32.0
+            out.append(round(self.shift_video * t / (1.0 + (self.shift_video - 1.0) * t), 6))
+        return out
 
     def to_dict(self) -> dict:
         return asdict(self)
