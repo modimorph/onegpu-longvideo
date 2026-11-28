@@ -398,9 +398,9 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         (tmp / "sub.txt").write_text(subtitle or " ")
         en = f"enable='between(t,{lt['start_s']},{lt['start_s'] + lt['hold_s']})'"
         y = int(H * 0.78)
-        fc.append(f"[vc]drawtext=textfile='{tmp / 'title.txt'}':fontcolor=white:fontsize={int(H * 0.045)}:x={int(W * 0.06)}:y={y}:"
+        fc.append(f"[vc]drawtext=textfile='{tmp / 'title.txt'}':expansion=none:fontcolor=white:fontsize={int(H * 0.045)}:x={int(W * 0.06)}:y={y}:"
                   f"box=1:boxcolor=black@0.55:boxborderw={int(H * 0.012)}:{en},"
-                  f"drawtext=textfile='{tmp / 'sub.txt'}':fontcolor=white@0.85:fontsize={int(H * 0.03)}:x={int(W * 0.06)}:y={y + int(H * 0.07)}:"
+                  f"drawtext=textfile='{tmp / 'sub.txt'}':expansion=none:fontcolor=white@0.85:fontsize={int(H * 0.03)}:x={int(W * 0.06)}:y={y + int(H * 0.07)}:"
                   f"box=1:boxcolor=black@0.55:boxborderw={int(H * 0.01)}:{en}[vt]")
         vlast = "[vt]"
     qa["titles"] = {"lower_third": bool(title), "title_chars": len(title or "")}

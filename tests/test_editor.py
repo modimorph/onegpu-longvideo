@@ -72,7 +72,7 @@ def test_edit_end_to_end(tmp_path):
     (tmp_path / "plan.json").write_text(json.dumps(plan))
     out = tmp_path / "edit"
     with pytest.raises(SystemExit):
-        cli.main(["edit", str(clips), "--plan", str(tmp_path / "plan.json"), "--out", str(out), "--title", "Demo", "--subtitle", "test"])
+        cli.main(["edit", str(clips), "--plan", str(tmp_path / "plan.json"), "--out", str(out), "--title", "Demo: 50% off", "--subtitle", "test"])
     qa = json.loads((out / "edit_qa.json").read_text())
     assert (out / "final.mp4").exists() and (out / "contact_sheet.jpg").exists()
     g = {x["id"]: x["pass"] for x in qa["gates"]}
@@ -86,6 +86,7 @@ def test_edit_end_to_end(tmp_path):
     assert after[0] < 0.3, after          # the anchor clip keeps its pixels (no implicit colour-matrix guess at the concat)
     assert qa["final"]["width"] == 320 and qa["loudness"]["final"]["TP"] <= -1.95
     assert qa["contact_sheet"]["frames"] == 42 and len(qa["contact_sheet"]["t"]) == 42
+    assert "expansion=none" in " ".join(qa["ffmpeg_assemble"])   # a '%' in a title made drawtext drop the whole line
     assert qa["titles"]["lower_third"] is True and not any("lower third skipped" in w for w in qa.get("warnings", []))
     assert not any("time codes" in w for w in qa.get("warnings", []))
 
