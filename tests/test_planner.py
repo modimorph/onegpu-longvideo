@@ -272,3 +272,37 @@ def test_planner_fuzz_never_raises_and_keeps_angle_band():
                                                   for _ in range(random.randint(0, 5))]]) for i in range(random.randint(1, 20))]
         p = PL.plan(PL.Script("t", clips, {"language": random.choice(["English", "German"])}, {}), prof)
         assert not p["angles"]["errors"]
+
+
+def test_llm_review_speaks_openai_chat_format(tmp_path, monkeypatch):
+    import http.server
+    import threading
+
+    seen = {}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen["path"] = self.path
+            seen["auth"] = self.headers.get("Authorization")
+            seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            out = json.dumps({"choices": [{"message": {"content": "clip 1 line 2: repeated idea -> cut it"}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("OLV_LLM_URL", f"http://127.0.0.1:{srv.server_port}/v1")
+    monkeypatch.setenv("OLV_LLM_MODEL", "writer")
+    monkeypatch.setenv("OLV_LLM_KEY", "test-key")
+    with pytest.raises(SystemExit):
+        cli.main(["plan", str(EXAMPLE), "--llm", "--out", str(tmp_path)])
+    srv.shutdown()
+    assert seen["path"] == "/v1/chat/completions" and seen["auth"] == "Bearer test-key" and seen["body"]["model"] == "writer"
+    assert "Script:" in seen["body"]["messages"][0]["content"]
+    assert (tmp_path / "text_review.md").read_text().startswith("clip 1 line 2")
