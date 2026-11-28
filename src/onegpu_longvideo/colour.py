@@ -44,15 +44,16 @@ def probe(path: str) -> dict:
             "fps": float(a) / float(b or 1), "has_audio": any(s["codec_type"] == "audio" for s in d["streams"])}
 
 
-def frames_rgb(path: str, step: int = 4, start: float | None = None, end: float | None = None):
-    """Yield RGB frames (H, W, 3) scaled to 320x180, every `step`-th frame of [start, end)."""
+def frames_rgb(path: str, step: int = 4, start: float | None = None, end: float | None = None, crop: float = 1.0):
+    """Yield RGB frames (H, W, 3) scaled to 320x180, every `step`-th frame of [start, end); crop > 1 = centre crop (punch-in)."""
     cmd = ["ffmpeg", "-v", "error"]
     if start is not None:
         cmd += ["-ss", f"{start:.3f}"]
     cmd += ["-i", path]
     if end is not None:
         cmd += ["-t", f"{max(0.04, end - (start or 0)):.3f}"]
-    cmd += ["-vf", f"scale={W}:{H}:flags=area:in_color_matrix=bt709:in_range=tv:out_range=full", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    pre = f"crop=iw/{crop}:ih/{crop}," if crop and crop != 1.0 else ""
+    cmd += ["-vf", f"{pre}scale={W}:{H}:flags=area:in_color_matrix=bt709:in_range=tv:out_range=full", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     i, n = 0, W * H * 3
     try:

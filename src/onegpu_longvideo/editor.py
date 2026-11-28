@@ -303,8 +303,21 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         ids = [c["clip"] for c in qa["clips"]]
         a_idx = ids.index(col["anchor_clip"]) if col["anchor_clip"] in ids else 0     # anchor clip missing: first clip
         anchor = target or stats[a_idx]
+        # A global mean match is only fair between shots of the same framing: a wide shot holds more wall than a close-up,
+        # so its mean colour differs with an identical grade. Each camera set-up gets its own anchor: the main anchor for the
+        # anchor's set-up, else the first clip of that set-up (its reference still was made from the anchor look).
+        setup = {a["clip"]: a.get("setup", "A") for a in plan.get("angles", {}).get("clips", [])}
+        same_camera = plan.get("angles", {}).get("mode", "generate") != "generate"
+        a_setup = "A" if same_camera else setup.get(ids[a_idx], "A")
+        setup_anchor = {a_setup: anchor}
+        for c, s in zip(qa["clips"], stats):
+            su = "A" if same_camera else setup.get(c["clip"], "A")
+            c["setup"] = su
+            setup_anchor.setdefault(su, s)
+            c["anchor_stats"] = setup_anchor[su]
         rs = col["ramp_s"]
         for c, s in zip(qa["clips"], stats):
+            anchor = c["anchor_stats"]
             c["colour_before"] = {"stats": s, "dE76_vs_anchor": C.de76(s, anchor)}
             a, b = c["segments"][0][0], c["segments"][-1][1]
             if col["mode"] == "ramp" and b - a > 3 * rs:
@@ -316,12 +329,13 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                 if max(C.de76(s_a, anchor), C.de76(s_b, anchor)) >= col["skip_below_dE"]:
                     c["ramp"] = {"a": s_a, "b": s_b}
                 c["cube"] = None
-            elif c["clip"] == ids[a_idx] and not target or C.de76(s, anchor) < col["skip_below_dE"]:
+            elif (c["clip"] == ids[a_idx] and not target) or C.de76(s, anchor) < col["skip_below_dE"]:
                 c["cube"] = None
             else:
                 c["cube"] = str(tmp / f"clip{c['clip']}.cube")
                 C.write_cube(s, anchor, c["cube"], strength=col["strength"])
-        qa["anchor"] = {"source": "plan target" if target else f"clip {ids[a_idx]}", "stats": anchor}
+        qa["anchor"] = {"source": "plan target" if target else f"clip {ids[a_idx]}", "stats": setup_anchor[a_setup],
+                        "per_setup": {k: v for k, v in setup_anchor.items()}}
 
     # E4 filter graph
     fade = ed["cuts"]["audio_fade_ms"] / 1000.0
@@ -360,8 +374,8 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                 # (measured on 300 frames of 1080p: blend with an expression 34.9 s, xfade 5.5 s, one LUT 3.9 s)
                 w0, w1 = kept_off / kept_total, (kept_off + (b - a)) / kept_total
                 ca, cb = str(tmp / f"c{c['clip']}_{k}_a.cube"), str(tmp / f"c{c['clip']}_{k}_b.cube")
-                C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], w0), qa["anchor"]["stats"], ca, strength=col["strength"])
-                C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], w1), qa["anchor"]["stats"], cb, strength=col["strength"])
+                C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], w0), c["anchor_stats"], ca, strength=col["strength"])
+                C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], w1), c["anchor_stats"], cb, strength=col["strength"])
                 fc += [vf + f",scale=in_color_matrix=bt709:in_range=tv:out_range=full,format=gbrp,split[sa{k}][sb{k}]",
                        f"[sa{k}]lut3d=file='{ca}':interp=tetrahedral[la{k}]",
                        f"[sb{k}]lut3d=file='{cb}':interp=tetrahedral[lb{k}]"]
@@ -372,7 +386,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                 if c.get("ramp"):     # piece longer than xfade allows: one LUT from the stats at its middle
                     cube = str(tmp / f"c{c['clip']}_{k}_m.cube")
                     wm = (kept_off + (b - a) / 2) / kept_total
-                    C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], wm), qa["anchor"]["stats"], cube, strength=col["strength"])
+                    C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], wm), c["anchor_stats"], cube, strength=col["strength"])
                 if cube:
                     vf += "," + C.LUT_CHAIN.format(cube=cube)
                 vf += "," + tags
@@ -493,15 +507,24 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         t += d
     qa["av"] = av_check(qa, str(final), fps)
     if stats:
-        after = [C.lab_stats(list(C.frames_rgb(str(final), step=col["sample_step"], start=a, end=b))) for a, b in pos]
-        anchor = qa["anchor"]["stats"]
-        for c, s in zip(qa["clips"], after):
-            c["colour_after"] = {"stats": s, "dE76_vs_anchor": C.de76(s, anchor)}
+        crop_anchor = {}
+        for c, (a, b) in zip(qa["clips"], pos):
+            s = C.lab_stats(list(C.frames_rgb(str(final), step=col["sample_step"], start=a, end=b)))
+            ref = c["anchor_stats"]
+            if c.get("punch_in"):    # compare a punched-in clip with the SAME centre crop of its anchor, not the full frame
+                if "v" not in crop_anchor:
+                    src = qa["clips"][a_idx]
+                    crop_anchor["v"] = C.lab_stats(list(C.frames_rgb(str(final), step=col["sample_step"], start=pos[a_idx][0],
+                                                                     end=pos[a_idx][1], crop=z))) if not src.get("punch_in") else None
+                ref = crop_anchor["v"] or ref
+            c["colour_after"] = {"stats": s, "dE76_vs_anchor": C.de76(s, ref), "vs": "crop of anchor" if c.get("punch_in") else f"set-up {c['setup']} anchor"}
         joins = []
         for (a0, b0), (a1, b1), c0, c1 in zip(pos, pos[1:], qa["clips"], qa["clips"][1:]):
             x = C.lab_stats(list(C.frames_rgb(str(final), step=1, start=max(a0, b0 - 0.5), end=b0)))
             y = C.lab_stats(list(C.frames_rgb(str(final), step=1, start=a1, end=min(b1, a1 + 0.5))))
-            joins.append({"join": f"{c0['clip']}->{c1['clip']}", "t": round(a1, 2), "dE76": C.de76(x, y)})
+            framing = c0["setup"] != c1["setup"] or bool(c0.get("punch_in")) != bool(c1.get("punch_in"))
+            joins.append({"join": f"{c0['clip']}->{c1['clip']}", "t": round(a1, 2), "dE76": C.de76(x, y),
+                          "gated": not framing, "note": "framing change: mean colour differs by content, not gated" if framing else ""})
         qa["colour_joins"] = joins
 
     # E6 contact sheet: cols x rows frames evenly spaced over the whole film
@@ -522,7 +545,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     # gates
     cg = (plan.get("color") or {}).get("gates") or prof["planner"]["color"]["gates"]
     col_ok = all(c.get("colour_after", {}).get("dE76_vs_anchor", 0) <= cg["clip_dE76_max"] for c in qa["clips"])
-    join_ok = all(j["dE76"] <= cg["join_dE76_max"] for j in qa.get("colour_joins", []))
+    join_ok = all(j["dE76"] <= cg["join_dE76_max"] for j in qa.get("colour_joins", []) if j.get("gated", True))
     L = qa["loudness"]["final"]
     gates = [
         {"id": "G8", "gate": "every 5 s window WER inside the limit (no gibberish)", "pass": not e1["errors"]},

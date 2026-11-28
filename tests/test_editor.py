@@ -170,3 +170,18 @@ def test_cli_errors_are_clean(tmp_path):
     with pytest.raises(SystemExit) as e:
         cli.main(["plan", str(tmp_path / "missing.yaml"), "--profile", "no_such_profile"])
     assert "profile not found" in str(e.value.code)
+
+
+@pytest.mark.skipif(not HAS_FF, reason="needs ffmpeg")
+def test_new_camera_setup_gets_its_own_colour_anchor(tmp_path):
+    # clip 2 is a different camera set-up (wider shot, other content): it must not be pushed onto clip 1's mean colour
+    _clip2(tmp_path / "clip1" / "video.mp4", colour="0x806050", seed=1)
+    _clip2(tmp_path / "clip2" / "video.mp4", colour="0x405080", seed=2)
+    _clip2(tmp_path / "clip3" / "video.mp4", colour="0x354570", seed=3)
+    plan = {"angles": {"mode": "generate", "clips": [{"clip": 1, "setup": "A"}, {"clip": 2, "setup": "B"}, {"clip": 3, "setup": "B"}]}}
+    qa = ED.edit(tmp_path, plan, TH, tmp_path / "o", require_wer=False)
+    c1, c2, c3 = qa["clips"]
+    assert c2["colour_before"]["dE76_vs_anchor"] == 0 and not c2.get("cube") and not c2.get("ramp")
+    assert c3["colour_before"]["dE76_vs_anchor"] > 3 and c3["colour_after"]["dE76_vs_anchor"] < c3["colour_before"]["dE76_vs_anchor"] / 2   # toward clip 2
+    j = {x["join"]: x for x in qa["colour_joins"]}
+    assert j["1->2"]["gated"] is False and j["2->3"]["gated"] is True
