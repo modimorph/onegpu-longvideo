@@ -249,3 +249,19 @@ def test_word_check_after_cuts_passes_when_the_cut_removes_a_replay(tmp_path):
     qa = ED.edit(tmp_path, plan, TH, tmp_path / "o")
     assert qa["clips"][0]["cuts"] and qa["final_word_check"]["win_wer"] == [0.0]
     assert next(g for g in qa["gates"] if g["id"] == "G8")["pass"]
+
+
+
+@pytest.mark.skipif(not HAS_FF, reason="needs ffmpeg")
+def test_inner_camera_cut_is_found(tmp_path):
+    a, b = tmp_path / "a.mp4", tmp_path / "b.mp4"
+    _clip2(a, colour="0x806050", seed=1, d=2)
+    _clip2(b, colour="0x203050", seed=2, d=2)
+    out = tmp_path / "clip1" / "video.mp4"
+    out.parent.mkdir()
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(a), "-i", str(b), "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][x]",
+                    "-map", "[v]", "-map", "[x]", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(out)], check=True)
+    from onegpu_longvideo import colour as C
+    assert C.hard_cuts(str(out)) == [2.0]
+    qa = ED.edit(tmp_path, None, TH, tmp_path / "o", require_wer=False)
+    assert qa["clips"][0]["inner_cuts"][0]["t"] == pytest.approx(2.0, abs=0.05)

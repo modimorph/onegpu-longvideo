@@ -372,6 +372,15 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         qa["clips"] = [c for c in qa["clips"] if c["segments"]]
     if not qa["clips"]:
         raise ValueError("no clip has anything to keep (check the word files and the cut settings)")
+    if ed["review"].get("detect_inner_cuts", True) and not dry_run:
+        for c in qa["clips"]:      # camera switches the model made inside a clip (report; check they sit between words)
+            a, b = c["segments"][0][0], c["segments"][-1][1]
+            cuts_in = [round(a + t, 3) for t in C.hard_cuts(c["video"], start=a, end=b)]
+            words = c.get("_words", [])
+            c["inner_cuts"] = [{"t": t, "in_word": any(w["t0"] + 0.02 < t < w["t1"] - 0.02 for w in words)} for t in cuts_in]
+            for x in c["inner_cuts"]:
+                qa.setdefault("warnings", []).append(
+                    f"clip {c['clip']}: the model cut the camera inside the clip at {x['t']} s" + (" INSIDE a word" if x["in_word"] else " (between words)"))
     W, H = qa["clips"][0]["width"] or 1280, qa["clips"][0]["height"] or 720
     fps = qa["clips"][0]["fps"] or 24
     W, H = (ed["encode"].get("width") or W), (ed["encode"].get("height") or H)
@@ -702,4 +711,5 @@ def summary(qa: dict) -> dict:
             "clip_dE76_after": [c.get("colour_after", {}).get("dE76_vs_anchor") for c in qa["clips"]],
             "join_dE76": [j["dE76"] for j in qa.get("colour_joins", [])], "cuts": sum(len(c["cuts"]) for c in qa["clips"]),
             "av_offsets_ms": [r["offset_ms"] for r in qa["av"]["segments"]], "stream_gap_s": qa["av"]["stream_gap_s"],
+            "inner_cuts": {c["clip"]: [x["t"] for x in c.get("inner_cuts", [])] for c in qa["clips"] if c.get("inner_cuts")},
             "contact_sheet": qa["contact_sheet"]["path"], "final": qa["final"]["path"], "warnings": qa.get("warnings", [])}

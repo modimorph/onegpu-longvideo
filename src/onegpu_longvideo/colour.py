@@ -101,3 +101,23 @@ def write_cube(src: dict, ref: dict, path: str, n: int = 33, strength: float = 1
 
 LUT_CHAIN = ("scale=in_color_matrix=bt709:in_range=tv:out_range=full,format=gbrp,lut3d=file='{cube}':interp=tetrahedral,"
              "scale=in_range=full:out_color_matrix=bt709:out_range=tv,format=yuv420p")
+
+
+def hard_cuts(path: str, start: float | None = None, end: float | None = None, ratio: float = 6.0, floor: float = 12.0) -> list[float]:
+    """Times (s, from `start`) of hard cuts inside a clip: a frame-to-frame mean absolute luma change above
+    max(floor, ratio x median change). A generated clip can switch camera by itself (seen: a set-up B clip that held the
+    frontal view for 4.7 s, then cut)."""
+    import numpy as np
+
+    prev, diffs = None, []
+    for f in frames_rgb(path, step=1, start=start, end=end):
+        y = f.astype(np.float32) @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+        if prev is not None:
+            diffs.append(float(np.abs(y - prev).mean()))
+        prev = y
+    if len(diffs) < 3:
+        return []
+    med = float(np.median(diffs))
+    fps = probe(path)["fps"]
+    thr = max(floor, ratio * med)
+    return [round((i + 1) / fps, 3) for i, d in enumerate(diffs) if d > thr]
