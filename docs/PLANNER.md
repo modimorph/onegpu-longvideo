@@ -41,6 +41,9 @@ Markdown: `## Segment N (t0-t1 s): title` followed by a table `| # | a-b | spoke
 
 Talking head, 6 x 30 s (our 3-min demo script): set-ups A A B B C A (changes at 60, 120 and 150 s), 11 gestures in 36 lines (was 36 cues, 8 finger shapes), 6 fake actions auto-fixed, G3 failed on clip 2 (75 words after the fixes, band 79-86), and a fact sheet from the production data failed 6 lines (G2F: render time, gestures, camera plan, voice conversion, speech limit, takes). The writer fixed both before any render.
 
+## Chained clips: one picture (talking head)
+With an identity still, a room plate and the chained last frame, the model built the room from the stills for about the first 4.7 s and then jumped to the chained frame (background SSIM vs clip 1: 0.385, then 0.79). With the chained frame as the only picture, the same seed gave 0.86 flat with no step. Talking-head profiles therefore set `prompt.chain_refs: seed_only`; clip 1 still uses the identity still and the room plate. Untested: identity over a long chain (watch the per-clip sheets). Check a clip with `olv bgcheck <clip> <clip 1 or room plate>`.
+
 ## Calibrate the speech band from renders (`olv calibrate`)
 The band is a prediction. The model sets its own pace: in our first 10 s talking-head clip it spoke 24 words at 2.46 w/s and ended at 9.76 s, against a planned 3.0 w/s and a deadline of 8.3 s.
 ```bash

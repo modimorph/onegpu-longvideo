@@ -10,3 +10,8 @@ planner:
   hook: {first_line_by_s: 5}        # say what the video covers within about 5 s (R-HK1)
   gestures:
     rest: "rests both hands on the desk and stays still"
+  prompt:
+    # Chained clips get ONE picture, the colour-matched last frame of the previous clip. With identity still + room plate +
+    # chained frame, the room jumped at about 4.7 s inside every chained clip (background SSIM vs clip 1: 0.385 -> 0.79).
+    # Same-seed probe with one picture: 0.86 flat, no step (28 Nov, n = 1; identity over a long chain still to be watched).
+    chain_refs: seed_only

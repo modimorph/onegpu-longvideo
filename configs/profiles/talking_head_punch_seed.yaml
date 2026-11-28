@@ -1,8 +1,0 @@
-# talking_head_punch with ONE reference for chained clips: the colour-matched last frame of the previous clip.
-# Hypothesis (ISSUES B66): separate identity still + room plate + chained frame disagree, and the model builds the room from the
-# stills for the first ~4.7 s, then jumps to the chained frame. Test: one 10 s clip, background SSIM per second vs clip 1.
-extends: talking_head_punch
-description: "Talking-head, punch-ins, chained clips get only the previous frame as reference (A/B variant)"
-planner:
-  prompt:
-    chain_refs: seed_only
