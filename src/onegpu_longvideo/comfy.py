@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -31,7 +32,11 @@ class ComfyClient:
         return json.loads(raw) if raw else {}
 
     def queue(self, graph: dict) -> str:
-        r = self._req("/prompt", {"prompt": graph, "client_id": self.client_id})
+        try:
+            r = self._req("/prompt", {"prompt": graph, "client_id": self.client_id})
+        except urllib.error.HTTPError as e:  # ComfyUI answers 400 with the reason (missing node class, file not in list...)
+            body = e.read().decode("utf-8", "replace")[:1500]
+            raise RuntimeError(f"ComfyUI rejected the graph (HTTP {e.code}): {body}") from e
         if r.get("node_errors"):
             raise RuntimeError(f"ComfyUI rejected the graph: {json.dumps(r['node_errors'])[:800]}")
         return r["prompt_id"]
@@ -39,7 +44,7 @@ class ComfyClient:
     def history(self, prompt_id: str) -> dict:
         return self._req(f"/history/{prompt_id}").get(prompt_id, {})
 
-    def wait(self, prompt_id: str, timeout_s: float = 3600, poll_s: float = 5.0) -> dict:
+    def wait(self, prompt_id: str, timeout_s: float = 3600, poll_s: float = 0.5) -> dict:
         t0 = time.time()
         while time.time() - t0 < timeout_s:
             h = self.history(prompt_id)
@@ -63,12 +68,33 @@ class ComfyClient:
         urllib.request.urlretrieve(f"{self.url}/view?{q}", dest)
         return dest
 
-    def run(self, graph: dict, dest: str | Path, timeout_s: float = 3600) -> dict:
+    def run(self, graph: dict, dest: str | Path, timeout_s: float = 3600, raw_dest: str | Path | None = None) -> dict:
         pid = self.queue(graph)
         h = self.wait(pid, timeout_s)
-        item = first_output(h)
+        up_ids = [k for k, n in graph.items() if n.get("class_type") == "OLVUpscaleVideoSave"]
+        if up_ids:  # in-graph upscale: take the files from that node only (never a preview of another node)
+            out = h.get("outputs", {}).get(up_ids[0], {})
+            vids = [v for v in out.get("images", []) if str(v.get("filename", "")).endswith(".mp4")]
+            main = [v for v in vids if not v["filename"].endswith("_raw.mp4")]
+            raws = [v for v in vids if v["filename"].endswith("_raw.mp4")]
+            if not main:
+                raise RuntimeError("the in-graph upscale node reported no video file")
+            item = main[0]
+        else:
+            item, raws, out = first_output(h), [], {}
+        if raw_dest is not None and not raws:  # check before writing anything, so no new main file sits beside an old raw take
+            raise RuntimeError("raw take requested but the graph has no in-graph upscale node output with a *_raw.mp4")
         path = self.download(item, dest)
-        return {"prompt_id": pid, "file": str(path), "exec_s": exec_seconds(h), "remote_file": item["filename"]}
+        res = {"prompt_id": pid, "file": str(path), "exec_s": exec_seconds(h), "remote_file": item["filename"]}
+        cached = set()
+        for m in h.get("status", {}).get("messages", []):
+            if isinstance(m, list) and len(m) > 1 and m[0] == "execution_cached" and isinstance(m[1], dict):
+                cached.update(m[1].get("nodes", []))
+        if out.get("olv_upscale_s") and up_ids[0] not in cached:  # a cached node reports an old run's time
+            res["upscale_in_graph_s"] = out["olv_upscale_s"][0]
+        if raw_dest is not None:
+            res["raw_file"] = str(self.download(raws[0], raw_dest))
+        return res
 
 
 def first_output(history_entry: dict) -> dict:

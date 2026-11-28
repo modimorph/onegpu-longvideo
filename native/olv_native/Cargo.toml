@@ -1,0 +1,18 @@
+[package]
+name = "olv_native"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"  # minimum; builds are pinned by Cargo.lock + --locked (a rust-toolchain.toml picked the GNU host on the PC and broke the build)
+license = "Apache-2.0"
+description = "Optional Rust (PyO3) cores for onegpu-longvideo: WER alignment and the voice RMS envelope."
+
+[lib]
+name = "olv_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.30.1", features = ["extension-module", "abi3-py310"] }
+
+[profile.release]
+lto = true
+codegen-units = 1

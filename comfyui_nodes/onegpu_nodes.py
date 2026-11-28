@@ -11,7 +11,8 @@ Nodes:
   FLTemporalRoPE   Temporal-axis RoPE change (RIFLEx-style): one t component (default k = 8, period 15.7 s at 40 rotary units
                    per second) gets a longer period; h and w columns untouched. In our tests it made speech WORSE (see docs/EXPERIMENTS.md).
 """
-import math, logging
+import logging
+import math
 
 try:
     import torch
@@ -81,7 +82,7 @@ class FLSageVideoRows:
     CATEGORY = "fastlong"
 
     def patch(self, model, pv, smooth_k, dense_blocks, start_percent, end_percent):
-        from sageattention import sageattn_qk_int8_pv_fp16_cuda, sageattn_qk_int8_pv_fp8_cuda
+        from sageattention import sageattn_qk_int8_pv_fp8_cuda, sageattn_qk_int8_pv_fp16_cuda
         kern, acc = {"fp16acc32": (sageattn_qk_int8_pv_fp16_cuda, "fp32"), "fp16acc16": (sageattn_qk_int8_pv_fp16_cuda, "fp16"),
                      "fp8acc32": (sageattn_qk_int8_pv_fp8_cuda, "fp32+fp32"), "fp8acc16": (sageattn_qk_int8_pv_fp8_cuda, "fp32+fp16")}[pv]
         ms = model.get_model_object("model_sampling")

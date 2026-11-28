@@ -59,8 +59,8 @@ olv profiles                                               # talking_head, tutor
 To render you need a ComfyUI install with the MiniMax-H3 nodes and your own model weights:
 
 1. Get the weights yourself and accept each licence (see "Models and licences"). File names go in the recipe under `models:`.
-2. Copy `comfyui_nodes/onegpu_nodes.py` into `ComfyUI/custom_nodes/` and restart ComfyUI (or set `ffn_chunk_tokens: 0`).
-3. Start ComfyUI, then:
+2. Copy `comfyui_nodes/onegpu_nodes.py` and `comfyui_nodes/onegpu_upscale.py` into `ComfyUI/custom_nodes/` and restart ComfyUI (or set `ffn_chunk_tokens: 0` and `upscale_in_graph: false`).
+3. Start ComfyUI with the flags in `configs/comfyui_flags.txt` (`--fast fp16_accumulation`; `tools/pc/serve_comfy.ps1` does it on Windows). The default video VAE is the int8 decoder `minimax_h3_video_vae_int8_convrot.safetensors` (ComfyUI >= 0.36); set `models: {video_vae: minimax_h3_video_vae_fp16.safetensors}` if you only have the fp16 file. With `upscale_in_graph: true` (default) `olv render` writes `<name>_1080p.mp4` and `<name>_raw.mp4`, so the `olv upscale` line below is only for `upscale_in_graph: false`. Then:
 
 ```bash
 export COMFY_URL=http://127.0.0.1:8188
@@ -112,7 +112,7 @@ Prompt rules that mattered in our runs: continuous speech with no planned silenc
 
 ## What we tried and what happened
 
-Short version; the full tables are in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) and [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+Native-code results (1.17-1.19x, not 2x): [docs/NATIVE.md](docs/NATIVE.md). Short version; the full tables are in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) and [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
 - **Route to 30 s at 1080p**: native 1080p did not fit (activations about 31 GB, estimated). 720p + VSA + streaming SPAN x2 took 12.7 min end to end (762 s), measured.
 - **Attention**: VSA keep 10 % was 3.4x faster than dense. Sage on video rows only was 1.44x. `torch.compile` failed at step 1.
