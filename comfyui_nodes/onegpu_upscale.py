@@ -54,7 +54,8 @@ class OLVUpscaleVideoSave:
     CATEGORY = "onegpu"
 
     def run(self, images, audio, upscale_model, width, height, fps, quality, filename_prefix, save_raw=True):
-        import folder_paths
+        import folder_paths, time as _time
+        t_start = _time.perf_counter()
         out_dir, fname, counter, subfolder, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory())
         os.makedirs(out_dir, exist_ok=True)
         file = f"{fname}_{counter:05}_.mp4"
@@ -182,7 +183,7 @@ class OLVUpscaleVideoSave:
         items = [{"filename": file, "subfolder": subfolder, "type": "output"}]
         if raw is not None:
             items.append({"filename": raw_file, "subfolder": subfolder, "type": "output"})
-        return {"ui": {"images": items, "animated": (True,)}}
+        return {"ui": {"images": items, "animated": (True,), "olv_upscale_s": [round(_time.perf_counter() - t_start, 2)]}}
 
 
 NODE_CLASS_MAPPINGS = {"OLVUpscaleVideoSave": OLVUpscaleVideoSave}

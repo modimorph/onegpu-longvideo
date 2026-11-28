@@ -63,12 +63,19 @@ class ComfyClient:
         urllib.request.urlretrieve(f"{self.url}/view?{q}", dest)
         return dest
 
-    def run(self, graph: dict, dest: str | Path, timeout_s: float = 3600) -> dict:
+    def run(self, graph: dict, dest: str | Path, timeout_s: float = 3600, raw_dest: str | Path | None = None) -> dict:
         pid = self.queue(graph)
         h = self.wait(pid, timeout_s)
         item = first_output(h)
         path = self.download(item, dest)
-        return {"prompt_id": pid, "file": str(path), "exec_s": exec_seconds(h), "remote_file": item["filename"]}
+        res = {"prompt_id": pid, "file": str(path), "exec_s": exec_seconds(h), "remote_file": item["filename"]}
+        for node_out in h.get("outputs", {}).values():  # in-graph upscale: its own seconds and the 720p raw take
+            if node_out.get("olv_upscale_s"):
+                res["upscale_in_graph_s"] = node_out["olv_upscale_s"][0]
+            raws = [v for v in node_out.get("images", []) if str(v.get("filename", "")).endswith("_raw.mp4")]
+            if raws and raw_dest:
+                res["raw_file"] = str(self.download(raws[0], raw_dest))
+        return res
 
 
 def first_output(history_entry: dict) -> dict:
