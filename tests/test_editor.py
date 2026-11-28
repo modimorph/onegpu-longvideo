@@ -157,7 +157,8 @@ def test_shared_phrase_with_previous_script_is_kept():
 def test_out_point_follows_the_last_kept_word():
     heard = _w("we ship it today um")
     cl = ED.cut_list(heard, 5.0, ED.find_flaws(heard, "we ship it today"), TH)
-    assert len(cl["segments"]) == 1 and cl["out"] == pytest.approx(heard[3]["t1"] + 0.25)
+    # OUT follows the last kept word, and the pad stops at the middle of the gap to the cut filler
+    assert len(cl["segments"]) == 1 and cl["out"] == pytest.approx((heard[3]["t1"] + heard[4]["t0"]) / 2)
 
 
 def test_cli_errors_are_clean(tmp_path):
