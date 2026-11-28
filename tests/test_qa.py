@@ -86,7 +86,8 @@ def test_normalize_keeps_unicode_words():
 
 @pytest.mark.parametrize("a,b", [("fifteen seconds", "15 seconds"), ("eighty-seven words", "87 words"), ("ten-eighty", "1080"),
                                  ("at full ten-eighty", "at full 1080p"), ("forty five", "45"), ("ten percent", "10%"),
-                                 ("two hundred and five", "205"), ("one thousand", "one thousand"), ("twenty four gigabytes", "24 gigabytes")])
+                                 ("two hundred and five", "205"), ("ten-eighty", "10-80"), ("ten-eighty", "10 80"),
+                                 ("full ten-eighty", "full 1080s"), ("one thousand", "one thousand"), ("twenty four gigabytes", "24 gigabytes")])
 def test_numbers_match_in_either_form(a, b):
     from onegpu_longvideo.qa import wer
     assert wer.normalize(a) == wer.normalize(b)
@@ -143,3 +144,10 @@ def test_background_reads_a_still_reference(tmp_path):
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=640x360:d=1", "-frames:v", "1", str(png)], check=True)
     got = list(B.frames(str(png), fps=2))
     assert len(got) == 1 and got[0][1].shape == (B.H, B.W, 3)
+
+
+
+def test_number_split_across_asr_words_matches():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("And at full 10 80, the memory runs out.".split())]
+    assert wer.score("And at full ten-eighty, the memory runs out.", heard, 5.0)["wer"] == 0

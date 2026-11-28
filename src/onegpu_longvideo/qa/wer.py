@@ -29,6 +29,8 @@ def _numbers(tokens: list[str]) -> list[str]:
     out, i = [], 0
 
     def group(j):            # one number below 1000 starting at j -> (value, next index) or (None, j)
+        if j < len(tokens) and tokens[j].isdigit() and len(tokens[j]) <= 2:      # digits from the ASR ("10 80")
+            return int(tokens[j]), j + 1
         val, k, seen = 0, j, False
         if k < len(tokens) and tokens[k] in _UNITS and k + 1 < len(tokens) and tokens[k + 1] == "hundred":
             val, k, seen = _UNITS[tokens[k]] * 100, k + 2, True
@@ -82,7 +84,7 @@ def normalize(s: str) -> list[str]:
     """Lower-case words; Unicode letters stay inside one word (an ASCII-only class split "größe" into two tokens);
     numbers in one form (digits): "fifteen" and "15" match, "10%" and "ten percent" match, "1,080" = "1080"."""
     s = re.sub(r"(?<=\d),(?=\d{3}\b)", "", s.lower()).replace("%", " percent ")
-    s = re.sub(r"\b(\d+)p\b", r"\1", s)                         # "1080p" -> "1080"
+    s = re.sub(r"\b(\d+)(?:p|s)\b", r"\1", s)                    # "1080p", "1080s" -> "1080"
     return [_spell(w) for w in _numbers(re.sub(r"[^\w' ]+|_", " ", s.replace("-", " ")).split())]
 
 
@@ -116,6 +118,15 @@ def align(ref: list[str], hyp: list[str]) -> list[tuple[str, int | None, int | N
 def score(reference_text: str, heard: list[Word], duration_s: float, window_s: float = 5.0) -> dict:
     ref = normalize(reference_text)
     hw = [Word(t, w.start, w.end, w.prob) for w in heard for t in normalize(w.text)]
+    # numbers split across ASR words ("10" "80" for "ten-eighty") join like the reference does
+    merged: list[Word] = []
+    for w in hw:
+        if (merged and w.text.isdigit() and merged[-1].text.isdigit() and len(w.text) == 2 and len(merged[-1].text) == 2
+                and int(merged[-1].text) >= 10 and int(w.text) >= 10):
+            merged[-1] = Word(merged[-1].text + w.text, merged[-1].start, w.end, min(merged[-1].prob, w.prob))
+        else:
+            merged.append(w)
+    hw = merged
     hyp = [w.text for w in hw]
     ops = align(ref, hyp)
     errs, ref_t = [], []
