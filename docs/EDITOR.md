@@ -37,6 +37,9 @@ Exit code 1 when an editor gate fails (G8-G13). `--dry-run` writes `edl.json` an
 | E4b sync check | Per segment, the source audio is cross-correlated with the final audio at the frame-exact picture position (8 kHz, +/- 400 ms search). Also the final's video and audio stream lengths. This checks the joins; lip sync inside a clip (model output) still needs SyncNet or a person. | G13 every segment within 10 ms, streams within one frame | R-ED6 |
 | E6 review | Contact sheet: 7 x 6 = 42 frames evenly spaced over the whole film (`fps=42/duration`, `tile=7x6`), each tile labelled with its time code. QA numbers in `edit_qa.json`: WER windows, cuts, colour before and after, joins, loudness tries, angle changes and gestures from the plan. A person opens the sheet and watches the film; `flow-check` needs `qa.contact_sheet_reviewed = true`. | G12 sheet written | |
 
+## Per-clip room review (before the edit)
+Run after each render, before the next one: `olv bgcheck <clip> <reference> --out bg.json` (needs opencv and mediapipe; on our PC it runs in ~100 s per 10 s clip on the CPU). It cuts the person out (MediaPipe selfie segmentation), compares the background with the reference every 0.5 s (SSIM, edge layout, dE76, worst cell of a 6x4 grid) and reports runs below threshold and steps (> 0.15) inside the clip. Send the flagged seconds and the reference room to the vision model with `qa.stage2.build_room_message`. Measured on the 1-min test: the step at 3.5-4.0 s in a chained clip led to the one-picture chaining fix (PLANNER.md).
+
 ## Measured
 - Synthetic 3-clip test (`tests/test_editor.py`, 320x180, 3 s clips with different colour casts): integrated loudness within 1 LU of -14, true peak at or below -2 dBTP, worst clip dE76 more than halved, 42-frame sheet.
 - Real 3-min talking-head edit (6 x 30 s, 1920x1080): see `docs/EXPERIMENTS.md`, section "Studio editor on the 3-min demo".
