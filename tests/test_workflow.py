@@ -21,7 +21,7 @@ def test_default_graph_valid():
 
 
 def test_dense_no_custom_nodes_no_realism():
-    g = W.build("x", R.Recipe(attention="dense", ffn_chunk_tokens=0, realism=0))
+    g = W.build("x", R.Recipe(attention="dense", ffn_chunk_tokens=0, realism=0, upscale_in_graph=False))
     assert W.validate(g) == [] and not W.uses_custom_nodes(g)
     assert g["guider"]["inputs"]["model"] == ["shift", 0]
     assert "lora_real" not in g and not g["cond"]["inputs"]["prompt"].startswith("r34l1sm")
@@ -64,3 +64,13 @@ def test_shipped_recipes_load_and_build(cfg):
     rc = R.load(CONFIGS / cfg)
     pr = (CONFIGS / rc.prompt_file).read_text()
     assert W.validate(W.build(pr, rc)) == []
+
+
+def test_upscale_in_graph_replaces_save():
+    g = W.build("x", R.Recipe())
+    assert g["save"]["class_type"] == "OLVUpscaleVideoSave" and "video" not in g
+    assert g["save"]["inputs"]["images"] == ["vdec", 0] and g["save"]["inputs"]["audio"] == ["adec", 0]
+    assert (g["save"]["inputs"]["width"], g["save"]["inputs"]["height"]) == (1920, 1080)
+    assert W.validate(g) == [] and W.uses_custom_nodes(g)
+    g2 = W.build("x", R.Recipe(upscale_in_graph=False))
+    assert g2["save"]["class_type"] == "SaveVideo"

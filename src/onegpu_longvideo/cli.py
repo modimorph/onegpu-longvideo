@@ -50,7 +50,8 @@ def cmd_render(a):
     log = TimingLog(out_dir / "timings.jsonl")
     cli = ComfyClient(a.server)
     with log.stage("render", frames=rc.frames, size=[rc.width, rc.height]) as row:
-        res = cli.run(g, out_dir / f"{rc.name}_raw.mp4", timeout_s=a.timeout)
+        res = cli.run(g, out_dir / (f"{rc.name}_1080p.mp4" if rc.upscale_in_graph else f"{rc.name}_raw.mp4"), timeout_s=a.timeout)
+        res["upscaled_in_graph"] = bool(rc.upscale_in_graph)
         row.update(exec_s=res["exec_s"])
     (out_dir / f"{rc.name}_recipe.json").write_text(json.dumps(rc.to_dict(), indent=1))
     print(json.dumps({**res, "timings": log.rows}))

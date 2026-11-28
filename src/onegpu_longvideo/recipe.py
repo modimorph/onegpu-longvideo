@@ -45,6 +45,7 @@ class Recipe:
     image_refs: list[str] = field(default_factory=list)
     upscale_to: list[int] = field(default_factory=lambda: [1920, 1080])
     upscale_model: str = "2xNomosUni_span_multijpg.safetensors"
+    upscale_in_graph: bool = True  # native-v1: SPAN x2 + encode inside the ComfyUI graph; render writes <name>_1080p.mp4
     prompt_file: str = ""
     models: Models = field(default_factory=Models)
 
