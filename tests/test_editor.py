@@ -86,6 +86,8 @@ def test_edit_end_to_end(tmp_path):
     assert after[0] < 0.3, after          # the anchor clip keeps its pixels (no implicit colour-matrix guess at the concat)
     assert qa["final"]["width"] == 320 and qa["loudness"]["final"]["TP"] <= -1.95
     assert qa["contact_sheet"]["frames"] == 42 and len(qa["contact_sheet"]["t"]) == 42
+    assert qa["titles"]["lower_third"] is True and not any("lower third skipped" in w for w in qa.get("warnings", []))
+    assert not any("time codes" in w for w in qa.get("warnings", []))
 
 
 def test_edit_dry_run_writes_edl(tmp_path):

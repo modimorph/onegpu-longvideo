@@ -391,7 +391,9 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     fc.append("".join(labels) + f"concat=n={k}:v=1:a=1[vc][ac]")
     vlast = "[vc]"
     lt = ed["titles"]
-    if title and lt.get("lower_third"):
+    if title and not lt.get("lower_third"):
+        qa.setdefault("warnings", []).append("--title given: lower third drawn although the profile has lower_third off")
+    if title:                      # an explicit --title always wins over the profile default
         (tmp / "title.txt").write_text(title)
         (tmp / "sub.txt").write_text(subtitle or " ")
         en = f"enable='between(t,{lt['start_s']},{lt['start_s'] + lt['hold_s']})'"
@@ -401,6 +403,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                   f"drawtext=textfile='{tmp / 'sub.txt'}':fontcolor=white@0.85:fontsize={int(H * 0.03)}:x={int(W * 0.06)}:y={y + int(H * 0.07)}:"
                   f"box=1:boxcolor=black@0.55:boxborderw={int(H * 0.01)}:{en}[vt]")
         vlast = "[vt]"
+    qa["titles"] = {"lower_third": bool(title), "title_chars": len(title or "")}
     enc = ed["encode"]
     assembled = out / "assembled.mkv"
     cmd = ["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", ";".join(fc), "-map", vlast, "-map", "[ac]",
@@ -422,6 +425,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
             cmd[cmd.index("-filter_complex") + 1] = ";".join(fc[:-1])
             cmd[cmd.index("[vt]")] = "[vc]"
             _run(cmd)
+            qa["titles"]["lower_third"] = False
         else:
             raise
 
