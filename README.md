@@ -1,8 +1,12 @@
+![One RTX 4090 turning pixelated frames into a clear 30-second single-shot video](docs/assets/cover.jpg)
+
 # onegpu-longvideo
 
 Long one-shot talking-head and cinematic video, with native speech and sound, on one consumer GPU.
 It drives a joint audio-video diffusion transformer (the MiniMax-H3 / FastH3 Omni family) through ComfyUI,
 renders 30 s in a single pass, upscales to 1080p with a streaming SPAN x2 model, and checks the result with a two-stage QA.
+
+All videos here are AI-generated and all people in them are invented. Flagship demo (170.6 s, AI presenter with an animated deck): [media/presenter.mp4](media/presenter.mp4), also first on the site.
 
 Watch the samples: **https://modimorph.github.io/onegpu-longvideo/**
 
