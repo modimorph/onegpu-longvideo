@@ -151,3 +151,10 @@ def test_number_split_across_asr_words_matches():
     from onegpu_longvideo.qa import wer
     heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("And at full 10 80, the memory runs out.".split())]
     assert wer.score("And at full ten-eighty, the memory runs out.", heard, 5.0)["wer"] == 0
+
+
+
+def test_split_tens_and_half_match():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("Attention was 80 7 percent, about 3.5 times faster.".split())]
+    assert wer.score("Attention was eighty-seven percent, about three and a half times faster.", heard, 5.0)["wer"] == 0

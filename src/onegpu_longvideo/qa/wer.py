@@ -85,6 +85,7 @@ def normalize(s: str) -> list[str]:
     numbers in one form (digits): "fifteen" and "15" match, "10%" and "ten percent" match, "1,080" = "1080"."""
     s = re.sub(r"(?<=\d),(?=\d{3}\b)", "", s.lower()).replace("%", " percent ")
     s = re.sub(r"\b(\d+)(?:p|s)\b", r"\1", s)                    # "1080p", "1080s" -> "1080"
+    s = re.sub(r"\b(\d+)\.5\b", r"\1 and a half", s)                # "3.5" -> "3 and a half" (as spoken)
     return [_spell(w) for w in _numbers(re.sub(r"[^\w' ]+|_", " ", s.replace("-", " ")).split())]
 
 
@@ -121,9 +122,11 @@ def score(reference_text: str, heard: list[Word], duration_s: float, window_s: f
     # numbers split across ASR words ("10" "80" for "ten-eighty") join like the reference does
     merged: list[Word] = []
     for w in hw:
-        if (merged and w.text.isdigit() and merged[-1].text.isdigit() and len(w.text) == 2 and len(merged[-1].text) == 2
-                and int(merged[-1].text) >= 10 and int(w.text) >= 10):
-            merged[-1] = Word(merged[-1].text + w.text, merged[-1].start, w.end, min(merged[-1].prob, w.prob))
+        prev = merged[-1].text if merged else ""
+        if (prev.isdigit() and w.text.isdigit() and len(w.text) == 2 and len(prev) == 2 and int(prev) >= 10 and int(w.text) >= 10):
+            merged[-1] = Word(prev + w.text, merged[-1].start, w.end, min(merged[-1].prob, w.prob))          # "10" "80" -> 1080
+        elif prev.isdigit() and w.text.isdigit() and int(prev) in range(20, 100, 10) and len(w.text) == 1 and w.text != "0":
+            merged[-1] = Word(str(int(prev) + int(w.text)), merged[-1].start, w.end, min(merged[-1].prob, w.prob))  # "80" "7" -> 87
         else:
             merged.append(w)
     hw = merged
