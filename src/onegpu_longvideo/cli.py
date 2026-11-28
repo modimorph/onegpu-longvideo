@@ -142,7 +142,10 @@ def cmd_edit(a):
 def cmd_profiles(a):
     from . import profiles
 
-    for n in profiles.names():
+    found = profiles.names()
+    if not found:
+        sys.exit(f"no profiles in {profiles.PROFILE_DIR}: run from the repo checkout (pip install -e .) or set OLV_PROFILE_DIR")
+    for n in found:
         print(f"{n:20s} {profiles.load(n).get('description', '')}")
 
 

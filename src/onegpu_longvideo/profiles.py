@@ -45,7 +45,10 @@ def load(name_or_path: str, profile_dir: str | Path | None = None) -> dict:
     if not p.suffix:
         p = (Path(profile_dir) if profile_dir else PROFILE_DIR) / f"{name_or_path}.yaml"
     if not p.exists():
-        raise FileNotFoundError(f"profile not found: {p} (known: {', '.join(names(profile_dir))})")
+        known = names(profile_dir)
+        hint = "" if known else (" No profiles found: run from the repo checkout (pip install -e .), or set OLV_PROFILE_DIR to the"
+                                 " repo's configs/profiles folder.")
+        raise FileNotFoundError(f"profile not found: {p} (known: {', '.join(known) or 'none'}).{hint}")
     over = yaml.safe_load(p.read_text()) or {}
     if over.get("extends"):          # a variant profile: merge over its parent (which is merged over the base)
         sib = p.parent / f"{over['extends']}.yaml"       # parent next to this file, else in the profile folder
