@@ -1,0 +1,28 @@
+# Example script for `olv plan` (talking-head profile): 3 clips x 10 s. Each clip is one continuous shot.
+# Write the whole film here; the planner reads it as one text, then builds one prompt per clip.
+# Band for 10 s clips at 2.8-3.1 words/s with first word at 0.3 s and last word by 8.3 s: 23-24 words per clip.
+title: Example explainer
+clip_seconds: 10
+speaker:
+  tag: S1
+  role: the presenter
+  language: English
+  voice_ref: true
+  description: "The presenter, a person in their thirties in a plain dark sweater, talks to the camera in a relaxed, friendly way at a steady pace."
+scene:
+  refs: "<Picture 1> is the identity reference for the presenter (S1). <Picture 2> is the reference for the room."
+  description: "A small, tidy studio with a plain wall, a desk lamp on the left and soft daylight from the right."
+  sound: "Quiet room tone under a clear, close voice; no music."
+clips:
+  - title: Hook
+    lines:
+      - "Hi. This whole shot came out of one home graphics card."
+      - "Picture and voice arrive together, from one text prompt, in a single pass."
+  - title: Problem
+    lines:
+      - "So what was hard? Long shots lost their words after fifteen seconds."
+      - "The fix was a whole plan, written before any single prompt existed."
+  - title: Close
+    lines:
+      - "That plan sets the pace, the camera angles and the colour."
+      - "Try it on your own script, and tell us what breaks for you."

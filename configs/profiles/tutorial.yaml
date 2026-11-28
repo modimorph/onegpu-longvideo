@@ -1,0 +1,23 @@
+# Tutorial: a presenter explains steps; screen or object detail matters more than the face.
+# Slower speech for focus, fewer gestures, pointing allowed more often, punch-in instead of new camera set-ups,
+# lower third and captions on (R-TU1, R-TU2, R-CA1).
+description: "Tutorial (step by step, presenter plus detail)"
+planner:
+  speech: {wps: [2.5, 2.9], wps_nominal: 2.7}
+  hook: {first_line_by_s: 5}
+  angles:
+    mode: punch_in
+    changes_per_3min: [3, 6]
+    min_open_clips: 1
+    min_clips_between: 1
+    sequence: [A, B, A, B, A, B, A]
+    setups:
+      A: "frontal medium shot at eye level, chest up, eyes to the lens"
+      B: "frontal medium shot at eye level, chest up, eyes to the lens"
+  gestures:
+    density: 0.25
+    types:
+      point_side: {budget: 4, cue: "\\b(here|this|click|open|look at|on screen|step)\\b", wording: "points with the right hand toward the side of the frame"}
+editor:
+  pacing: {punch_in_scale: 1.15}
+  titles: {lower_third: true, captions: true}

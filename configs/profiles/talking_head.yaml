@@ -1,0 +1,6 @@
+# Talking-head explainer: one presenter to camera, continuous speech, 10-30 s single shots.
+# All numbers come from _base.yaml (the base is the talking-head profile). Overrides only.
+# Angle plan: 2-3 set-up changes per 3 min at topic shifts, bookend on set-up A (R-AN1, R-AN2). Jump cuts keep the angle (R-ED2).
+description: "Talking-head explainer (YouTube style)"
+planner:
+  hook: {first_line_by_s: 5}        # say what the video covers within about 5 s (R-HK1)

@@ -1,0 +1,18 @@
+# Podcast (single host on camera, conversational). Wide plus close shots, change "every few minutes" (R-PO1, R-PO2).
+# More natural gestures, slightly slower speech; editor removes fillers and stutters only, no lower third after the open.
+description: "Podcast (host on camera, conversational)"
+planner:
+  speech: {wps: [2.6, 3.0], wps_nominal: 2.8}
+  hook: {first_line_by_s: 10}
+  angles:
+    changes_per_3min: [1, 2]
+    min_open_clips: 1
+    bookend: false
+    sequence: [A, B, A, B, A]
+    setups:
+      A: "medium shot at eye level, a podcast microphone on a boom arm in front, chest up, eyes slightly off the lens toward an unseen guest"
+      B: "close-up from a second camera about 30 degrees to the {side}, head and shoulders, microphone in the lower frame"
+  gestures: {density: 0.5, max_per_clip: 4}
+editor:
+  cuts: {remove: [stutter, filler, repeat]}
+  titles: {lower_third: true}

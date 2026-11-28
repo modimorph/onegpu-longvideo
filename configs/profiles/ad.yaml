@@ -1,0 +1,22 @@
+# Ad (6/15/30 s spot): key message in the first 3 s (R-AD1), brand or product in the first 5 s and more than two shots
+# in the first 5 s where the clip length allows (R-AD2), a clear call to action, end right after the payoff (R-HK3),
+# burned-in captions for sound-off viewing (R-CA2).
+description: "Ad spot (6, 15 or 30 s)"
+planner:
+  speech: {wps: [2.8, 3.2], wps_nominal: 3.0, end_margin_s: 1.2}
+  hook: {first_line_by_s: 3}
+  text: {max_line_words: 12}
+  angles:
+    changes_per_3min: [12, 36]
+    min_open_clips: 1
+    min_clips_between: 1
+    bookend: false
+    sequence: [A, C, B, A, C, B]
+    setups:
+      A: "tight frontal close-up, eyes to the lens, product in hand near the face"
+      B: "medium shot at eye level, chest up, eyes to the lens"
+      C: "close-up of the product in hand, the face soft in the background"
+  gestures: {density: 0.5}
+editor:
+  cuts: {tail_pad_s: 0.15}
+  titles: {lower_third: true, start_s: 0.5, hold_s: 3.0, captions: true}

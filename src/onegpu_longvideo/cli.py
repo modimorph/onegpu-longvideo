@@ -1,4 +1,4 @@
-"""Command line: olv graph | render | upscale | lint | wer | camera | flow-check."""
+"""Command line: olv plan | graph | render | upscale | lint | wer | camera | edit | flow-check | profiles."""
 from __future__ import annotations
 
 import argparse
@@ -73,12 +73,56 @@ def cmd_wer(a):
     from .qa import wer
 
     ref = Path(a.reference).read_text() if Path(a.reference).exists() else a.reference
-    heard = wer.transcribe(a.audio, model=a.model)
+    if a.words:   # word times made elsewhere (e.g. faster-whisper on another machine): [{"w"|"word", "t0"|"start", "t1"|"end"}]
+        heard = [wer.Word(x.get("w", x.get("word", "")), float(x.get("t0", x.get("start"))), float(x.get("t1", x.get("end"))), float(x.get("p", 1.0)))
+                 for x in json.loads(Path(a.words).read_text())]
+    else:
+        heard = wer.transcribe(a.audio, model=a.model)
     res = wer.score(ref, heard, a.seconds)
     res["pass"] = wer.passes(res, a.max_window_wer)
-    print(json.dumps({k: v for k, v in res.items() if k != "errors"}))
+    res["words"] = [{"w": w.text.strip(), "t0": round(w.start, 3), "t1": round(w.end, 3), "p": round(w.prob, 3)} for w in heard]  # olv edit reads these
+    print(json.dumps({k: v for k, v in res.items() if k not in ("errors", "words")}))
     if a.out:
         Path(a.out).write_text(json.dumps(res, indent=1))
+
+
+def cmd_plan(a):
+    import os
+
+    from . import planner as PL
+    from . import profiles
+
+    prof = profiles.load(a.profile)
+    sc = PL.load_script(a.script, clip_seconds=a.clip_seconds, scene_path=a.scene)
+    plan = PL.plan(sc, prof, anchor_still=a.anchor_still)
+    path = PL.write(plan, a.out)
+    if a.llm:
+        url, model = os.environ.get("OLV_LLM_URL"), os.environ.get("OLV_LLM_MODEL", "")
+        req = PL.llm_review_request(sc, plan["text_pass"])
+        (Path(a.out) / "text_review_request.md").write_text(req)
+        if url:
+            (Path(a.out) / "text_review.md").write_text(PL.llm_review(req, url, model, os.environ.get("OLV_LLM_KEY", "")))
+    print(json.dumps({"plan": str(path), **PL.summary(plan)}))
+    sys.exit(0 if plan["gates_pass"] or a.no_gate else 1)
+
+
+def cmd_edit(a):
+    from . import editor as ED
+    from . import profiles
+
+    plan = json.loads(Path(a.plan).read_text()) if a.plan else None
+    prof = profiles.load(a.profile or (plan or {}).get("film", {}).get("profile") or "talking_head")
+    qa = ED.edit(a.clips_dir, plan, prof, a.out, dry_run=a.dry_run, require_wer=not a.no_wer, title=a.title or "", subtitle=a.subtitle or "",
+                 wer_dir=a.wer_dir)
+    print(json.dumps(ED.summary(qa)))
+    sys.exit(0 if a.dry_run or qa["gates_pass"] else 1)
+
+
+def cmd_profiles(a):
+    from . import profiles
+
+    for n in profiles.names():
+        print(f"{n:16s} {profiles.load(n).get('description', '')}")
 
 
 def cmd_camera(a):
@@ -113,9 +157,22 @@ def main(argv=None):
     s = sub.add_parser("wer", help="per-window WER of an audio file against the intended lines")
     s.add_argument("audio"); s.add_argument("reference"); s.add_argument("--seconds", type=float, default=29.96)
     s.add_argument("--model", default="large-v3-turbo"); s.add_argument("--max-window-wer", type=float, default=0.03); s.add_argument("--out")
+    s.add_argument("--words", help="JSON word times from another ASR run; skips transcription (audio may be '-')")
     s.set_defaults(fn=cmd_wer)
     s = sub.add_parser("camera", help="estimate the camera move and compare with the plan")
     s.add_argument("video"); s.add_argument("--plan", choices=["push", "pull", "arc", "slide", "locked"]); s.set_defaults(fn=cmd_camera)
+    s = sub.add_parser("plan", help="whole-film planner (flow steps 1-2): plan.json + one prompt per clip")
+    s.add_argument("script", help="script YAML or Markdown segment tables"); s.add_argument("--profile", default="talking_head")
+    s.add_argument("--clip-seconds", type=float, help="override every clip length"); s.add_argument("--scene", help="YAML with speaker and scene text")
+    s.add_argument("--anchor-still", help="image whose grade is the colour anchor"); s.add_argument("--out", default="plan")
+    s.add_argument("--llm", action="store_true", help="write the whole-script review request; send it if OLV_LLM_URL is set")
+    s.add_argument("--no-gate", action="store_true", help="exit 0 even when a plan gate fails"); s.set_defaults(fn=cmd_plan)
+    s = sub.add_parser("edit", help="studio editor (flow steps 9, 11, 12): cut, colour match, loudness, contact sheet, QA")
+    s.add_argument("clips_dir"); s.add_argument("--plan"); s.add_argument("--profile"); s.add_argument("--out", default="edit")
+    s.add_argument("--title"); s.add_argument("--subtitle"); s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--wer-dir", help="folder with clipN.wer.json files (keeps the clip folders clean)")
+    s.add_argument("--no-wer", action="store_true", help="allow clips without wer.json (G8 then only covers checked clips)"); s.set_defaults(fn=cmd_edit)
+    s = sub.add_parser("profiles", help="list scenario profiles"); s.set_defaults(fn=cmd_profiles)
     s = sub.add_parser("flow-check", help="validate a run folder against the required-flow gates (docs/FLOW.md)")
     s.add_argument("run_dir"); s.set_defaults(fn=cmd_flow_check)
     a = ap.parse_args(argv)

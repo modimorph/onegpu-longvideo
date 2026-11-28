@@ -1,0 +1,75 @@
+# Base profile: every profile in this folder is deep-merged over this file (onegpu_longvideo.profiles).
+# Defaults are the talking-head numbers. Rule ids (R-..) point to docs/PLANNER.md and docs/EDITOR.md, which list the sources.
+planner:
+  speech:
+    wps: [2.8, 3.1]            # continuous speech band, words per second (our runs: 2.9 w/s gave 0 % WER in all windows; R-SP1)
+    wps_nominal: 2.95          # rate used to estimate line times
+    lint_max_wps: 3.2          # prompt.lint limit over the whole clip
+    start_s: 0.3               # first word
+    end_margin_s: 1.7          # last word by S - 1.7 s (leftover time gets filled with invented words; R-SP2)
+    train_window_s: 15         # the model was trained on clips up to 15 s
+    window_speech_end_s: 14.5  # inside a clip of <= 15 s, no word after 14.5 s
+    deadline_tolerance_s: 0.3
+  hook: {first_line_by_s: 5}   # the first line states the promise early (R-HK1)
+  banned_actions: [stutter, self_correction, cough, filler, fake_stop, repeated_sentence]   # generated speech turns these into gibberish (R-SP3)
+  text:
+    max_line_words: 18
+    repeat_ngram: 5            # a run of 5 words said twice in the film = repeated sentence (fail)
+    idea_overlap_jaccard: 0.5  # content-word overlap between lines of different clips (warning)
+    connector_regex: "^(so|then|first|next|now|but|and|here|that|this|which|because|after|before|finally|last|today)\\b"
+  angles:
+    mode: generate             # generate = new camera set-up written into the prompt; punch_in = editor crop; none
+    changes_per_3min: [2, 3]   # R-AN1
+    min_open_clips: 2          # the opening set-up holds the hook and the problem
+    min_clips_between: 2
+    bookend: true              # close on the opening set-up
+    default_side: left
+    sequence: [A, B, C, A]
+    setups:
+      A: "frontal medium close-up at eye level, chest up, eyes to the lens"
+      B: "medium shot from a second camera about 30 degrees to the {side}, eye level, head turned slightly toward that camera"
+      C: "wider frontal medium shot, waist up, more of the room visible, eyes to the lens"
+  gestures:
+    density: 0.4               # gestures per spoken line; every other line rests (R-GE1)
+    max_per_clip: 3
+    min_gap_s: 40              # same gesture type at least 40 s apart
+    finger_max: 2              # finger or thumb shapes in the whole film (R-GE2)
+    finger_types: [count_fingers, small_gap]
+    rest: "rests both hands on the desk and stays still"
+    types:
+      greeting:      {budget: 1, cue: "^(hi|hello|hey)\\b|thanks for watching", wording: "gives a small wave with the right hand"}
+      count_fingers: {budget: 1, cue: "\\b(two|three|four) (problems|things|steps|reasons|parts|ways|takes)\\b", wording: "briefly holds up {n} fingers of the right hand"}
+      palm_out_no:   {budget: 2, cue: "^no\\b|\\bnot (every|a|one)\\b|\\bno (api|cloud|cuts)\\b", wording: "shows the right palm toward the camera with a small no shake"}
+      point_side:    {budget: 2, cue: "\\b(here's how|look at|on screen|this chart|this one|repo)\\b", wording: "points with the right hand toward the side of the frame"}
+      open_palm:     {budget: 2, cue: "\\b(percent|half|honestly|everything|open)\\b", wording: "turns an open right palm up and holds it for a beat"}
+      small_gap:     {budget: 1, cue: "\\b(only|small|tiny|little)\\b", wording: "holds a small gap between right thumb and index finger"}
+      sweep:         {budget: 2, cue: "\\b(then|together|in one pass|from start to end|all of it)\\b", wording: "sweeps the right hand slowly from left to right"}
+      lean_in:       {budget: 1, cue: "\\b(try it|tell us|what breaks|your turn|let me know)\\b", wording: "leans in slightly toward the camera with hands together"}
+  color:
+    anchor: clip1              # clip1 or still (pass --anchor-still)
+    gates: {clip_dE76_max: 2.0, join_dE76_max: 1.0}   # R-CO2
+  prompt:
+    trigger: ""
+    picture_chain: "<Picture 3> is the last moment of the previous shot, colour-matched to the anchor grade: continue in exactly this pose, light and framing."
+    picture_setup: "<Picture 3> is the framing reference for camera set-up {setup}: same person and room, seen from this camera."
+    camera_tail: "The camera is fixed on a tripod and the framing stays the same for the whole shot, one continuous take."
+editor:
+  word_check: {window_s: 5, max_window_wer: 0.03, gibberish_invented: 2}   # R-ED1
+  cuts:
+    trim_in: true
+    trim_out: true
+    lead_pad_s: 0.15           # IN a few frames before the first word
+    tail_pad_s: 0.25           # OUT after the last word on a settled frame (tail + lead = 0.3-0.5 s; R-ED3)
+    internal: true             # cut repeats, stutters, fillers that the script does not have (jump cut)
+    remove: [repeat, stutter, filler]
+    repeat_ngram: 4
+    audio_fade_ms: 30          # short fade at every audio boundary (R-ED4)
+    min_segment_s: 0.2
+  pacing:
+    max_shot_s: 30
+    punch_in_scale: 1.12
+  color: {method: reinhard_lab, anchor_clip: 1, strength: 1.0, sample_step: 4, skip_below_dE: 0.5}   # R-CO1
+  audio: {lufs: -14, lufs_tol: 1.0, true_peak: -2.0, lra: 11}   # R-AU1, R-AU2
+  titles: {lower_third: false, start_s: 2.0, hold_s: 4.0, captions: false}
+  review: {contact_sheet: [7, 6], thumb_width: 320}
+  encode: {crf: 18, preset: medium, audio_kbps: 192, width: null, height: null}

@@ -1,0 +1,475 @@
+"""Whole-film planner (flow steps 1-2): read the whole script once, write one film plan, then build every clip prompt from it.
+
+"Decode the whole, then encode the parts." Stages (docs/PLANNER.md):
+  P1 text pass      fake actions auto-fixed (stutters, coughs, fillers, self-corrections, fake stops), repeated sentences
+                    and repeated ideas flagged, weak joins between clips flagged; optional LLM review request.
+  P2 speech density words per clip inside the profile band, last word by S - margin, no word after the training-window edge.
+  P3 angle plan     camera set-ups changed only at clip joins, at the biggest topic shifts, inside the profile band, bookend.
+  P4 gesture budget each gesture type at most its film budget, matched to the meaning of the line, spread out; rest by default.
+  P5 colour anchor  the target grade (a still or clip 1) and the colour gates the editor enforces.
+  P6 prompts        one prompt per clip built with `prompt.build` from the plan, then `prompt.lint`.
+No model call and no GPU unless the optional LLM review is asked for.
+"""
+from __future__ import annotations
+
+import json
+import math
+import re
+from collections import Counter
+from dataclasses import dataclass, field
+from itertools import combinations
+from pathlib import Path
+
+from . import prompt as P
+
+STOP = set("""a an the and or but so to of in on at for with from by is are was were be been it its it's this that these those we our us you your i i'm
+my me he his she her they them their there here what which who how when then than just only also too very really about into over out up down not no
+one two three four five six seven eight nine ten got get make makes made like kind thing first next now back way well per each every""".split())
+
+
+@dataclass
+class Line:
+    text: str
+    raw: str = ""
+    cue: str = ""          # optional hint from the writer (old gesture column); never copied into the prompt
+
+
+@dataclass
+class Clip:
+    idx: int
+    title: str
+    seconds: float
+    lines: list[Line] = field(default_factory=list)
+    side: str = ""         # optional: which side of frame the second camera sits for this clip
+
+
+@dataclass
+class Script:
+    title: str
+    clips: list[Clip]
+    speaker: dict = field(default_factory=dict)   # tag, role, description, language, voice_ref
+    scene: dict = field(default_factory=dict)     # refs, description, sound
+
+
+# ---------------------------------------------------------------- input
+def _segments_md(text: str, clip_seconds: float | None) -> list[Clip]:
+    """Markdown script: '## Segment N (t0-t1 s): title' + table rows '| n | a-b | line | gesture |'."""
+    clips = []
+    for m in re.finditer(r"^## Segment (\d+) \(([\d.]+)-([\d.]+) s\):\s*(.*?)\n(.*?)(?=^## Segment|\Z)", text, re.S | re.M):
+        rows = re.findall(r"^\|\s*\d+\s*\|\s*[\d.]+-[\d.]+\s*\|\s*(.*?)\s*\|\s*(.*?)\s*\|\s*$", m.group(5), re.M)
+        secs = clip_seconds or (float(m.group(3)) - float(m.group(2)))
+        clips.append(Clip(int(m.group(1)), m.group(4).strip(), secs, [Line(r[0], r[0], r[1]) for r in rows]))
+    return clips
+
+
+def load_script(path: str | Path, clip_seconds: float | None = None, scene_path: str | Path | None = None) -> Script:
+    """Load a YAML script (see configs/scripts/example_talking_head.yaml) or a Markdown segment-table script."""
+    import yaml
+
+    p = Path(path)
+    txt = p.read_text()
+    extra = yaml.safe_load(Path(scene_path).read_text()) if scene_path else {}
+    if p.suffix in (".yaml", ".yml", ".json"):
+        d = yaml.safe_load(txt)
+        d = {**d, **{k: v for k, v in (extra or {}).items() if k in ("speaker", "scene")}}
+        default_s = clip_seconds or float(d.get("clip_seconds", 29.96))
+        clips = []
+        for i, c in enumerate(d["clips"], 1):
+            lines = [Line(x, x) if isinstance(x, str) else Line(x["text"], x["text"], x.get("cue", "")) for x in c["lines"]]
+            clips.append(Clip(i, c.get("title", f"clip {i}"), float(c.get("seconds", default_s)), lines, c.get("side", "")))
+        return Script(d.get("title", p.stem), clips, d.get("speaker", {}), d.get("scene", {}))
+    clips = _segments_md(txt, clip_seconds)
+    if not clips:
+        raise ValueError(f"no clips found in {p}: use the YAML format or '## Segment N (t0-t1 s): title' tables")
+    title = (re.search(r"^# (.*)$", txt, re.M) or [None, p.stem])[1]
+    return Script(title, clips, (extra or {}).get("speaker", {}), (extra or {}).get("scene", {}))
+
+
+# ---------------------------------------------------------------- P1 text pass
+FAKE_ACTIONS = [  # (kind, pattern, replacement); applied in this order
+    ("cough", r"\s*[\[(*](?:soft |small |little )?(?:cough|coughs|laugh|laughs|sigh|sighs|clears throat|pause|breath|breathes)[^\])*]*[\])*]\s*", " "),
+    ("self_correction", r"\s*\.\.\.\s*(?:well|no|sorry|i mean),?\s*(?:nearly|actually|almost)?,?\s*[^.?!]*", ""),
+    ("self_correction", r"\b(?:no|sorry|i mean),\s*actually,?\s*", ""),
+    ("filler", r"(?<![\w'])(?:um+|uh+|erm|er|hmm+|you know,)(?![\w'])[,.]?\s*", ""),
+    ("stutter", r"\b(\w+(?:'\w+)?),? \1\b", r"\1"),
+    ("fake_stop", r"\s*(?:\.\.\.|…|\s--\s|—)\s*", ". "),
+]
+
+
+def _cap(s: str) -> str:
+    s = re.sub(r"\s+", " ", s).strip()
+    s = re.sub(r"\s+([,.?!])", r"\1", s)
+    s = re.sub(r"([.?!])\s*\.", r"\1", s)
+    s = re.sub(r"(^|[.?!]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), s)
+    return s
+
+
+def fix_fake_actions(text: str, banned: list[str]) -> tuple[str, list[str]]:
+    """Remove banned fake actions that have a mechanical fix. Returns (clean text, kinds fixed)."""
+    out, kinds = text, []
+    for kind, pat, rep in FAKE_ACTIONS:
+        if kind not in banned:
+            continue
+        new = re.sub(pat, rep, out, flags=re.I)
+        if new != out:
+            kinds.append(kind)
+            out = new
+    return _cap(out), kinds
+
+
+def norm_words(s: str) -> list[str]:
+    return re.sub(r"[^a-z0-9' ]+", " ", s.lower().replace("-", " ")).split()
+
+
+def content_words(s: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z][a-z'-]+", s.lower()) if w not in STOP and len(w) > 3}
+
+
+def repeated_runs(lines: list[tuple[str, str]], n: int) -> list[dict]:
+    """Runs of n+ words said twice anywhere in the film. lines = [(where, text)]."""
+    seen: dict[tuple, str] = {}
+    hits = []
+    for where, text in lines:
+        w = norm_words(text)
+        local = set()
+        for i in range(len(w) - n + 1):
+            g = tuple(w[i:i + n])
+            if all(x in STOP for x in g):
+                continue
+            if g in seen and g not in local:
+                hits.append({"where": where, "type": "repeated_sentence", "first": seen[g], "words": " ".join(g)})
+            seen.setdefault(g, where)
+            local.add(g)
+    # one hit per (where, first) pair is enough
+    out, keys = [], set()
+    for h in hits:
+        k = (h["where"], h["first"])
+        if k not in keys:
+            keys.add(k)
+            out.append(h)
+    return out
+
+
+def text_pass(script: Script, prof: dict) -> dict:
+    tp = prof["planner"]["text"]
+    banned = prof["planner"]["banned_actions"]
+    fixes, flags = [], []
+    for c in script.clips:
+        for n, ln in enumerate(c.lines, 1):
+            ln.text, kinds = fix_fake_actions(ln.raw or ln.text, banned)
+            if kinds:
+                fixes.append({"where": f"line {n} of clip {c.idx}", "fixed": kinds})
+            if re.search(r"\d", ln.text):
+                flags.append({"where": f"line {n} of clip {c.idx}", "type": "digits", "severity": "warn", "note": "write numbers as words"})
+            if len(ln.text.split()) > tp["max_line_words"]:
+                flags.append({"where": f"line {n} of clip {c.idx}", "type": "long_line", "severity": "warn", "note": f"> {tp['max_line_words']} words"})
+            if ln.text and ln.text[-1] not in ".?!":
+                ln.text += "."
+    where_text = [(f"line {n} of clip {c.idx}", ln.text) for c in script.clips for n, ln in enumerate(c.lines, 1)]
+    errors = []
+    # banned actions that survive the mechanical fix (e.g. a stutter across punctuation) are errors
+    for where, t in where_text:
+        for kind, pat, _ in FAKE_ACTIONS:
+            if kind in banned and re.search(pat, t, re.I):
+                errors.append({"where": where, "type": f"banned_{kind}", "severity": "fail"})
+    if "repeated_sentence" in banned:
+        errors += [{**h, "severity": "fail"} for h in repeated_runs(where_text, tp["repeat_ngram"])]
+    # repeated ideas across clips (content-word overlap): a warning for the writer, not a fail
+    L = [(c.idx, n, content_words(ln.text)) for c in script.clips for n, ln in enumerate(c.lines, 1)]
+    for i in range(len(L)):
+        for j in range(i + 1, len(L)):
+            if L[i][0] == L[j][0] or not L[i][2] or not L[j][2]:
+                continue
+            a, b = L[i][2], L[j][2]
+            jac = len(a & b) / len(a | b)
+            if jac >= tp["idea_overlap_jaccard"] and len(a & b) >= 3:
+                flags.append({"where": f"line {L[j][1]} of clip {L[j][0]}", "type": "repeated_idea", "severity": "warn",
+                              "first": f"line {L[i][1]} of clip {L[i][0]}", "overlap": round(jac, 2)})
+    joins = []
+    hook = re.compile(tp["connector_regex"], re.I)
+    for a, b in zip(script.clips, script.clips[1:]):
+        if not a.lines or not b.lines:
+            continue
+        first = b.lines[0].text
+        shared = content_words(a.lines[-1].text) & content_words(first)
+        ok = bool(hook.match(first)) or bool(shared)
+        joins.append({"join": f"{a.idx}->{b.idx}", "linked": ok})
+        if not ok:
+            flags.append({"where": f"join {a.idx}->{b.idx}", "type": "weak_join", "severity": "warn", "note": "add a bridge clause"})
+    return {"fixes": fixes, "errors": errors, "warnings": flags, "joins": joins}
+
+
+def llm_review_request(script: Script, tp_result: dict) -> str:
+    """The whole-script review request for a writer model (logic, grammar, flow). Its answer is advice; it is never auto-applied."""
+    body = "\n".join(f"clip {c.idx} ({c.title}), line {n}: {ln.text}" for c in script.clips for n, ln in enumerate(c.lines, 1))
+    flags = json.dumps(tp_result["errors"] + tp_result["warnings"], indent=0)
+    return ("You are a script editor for a spoken video. Read the WHOLE script below as one text.\n"
+            "Check: logic from start to end, grammar, flow between clips, repeated ideas or sentences, claims that contradict each other, "
+            "and any fake spoken action (stutter, cough, filler, self-correction, fake stop). Keep every line's word count within 2 words.\n"
+            "Answer only as lines: 'clip M line N: <problem type> -> <rewrite>'. Write 'OK' if nothing needs a change.\n\n"
+            f"Automatic flags:\n{flags}\n\nScript:\n{body}\n")
+
+
+def llm_review(request: str, url: str, model: str, key: str = "", timeout: float = 120) -> str:
+    """POST the request to an OpenAI-compatible /chat/completions endpoint."""
+    import urllib.request
+
+    req = urllib.request.Request(url.rstrip("/") + "/chat/completions", method="POST",
+                                 data=json.dumps({"model": model, "messages": [{"role": "user", "content": request}], "temperature": 0}).encode(),
+                                 headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())["choices"][0]["message"]["content"]
+
+
+# ---------------------------------------------------------------- P2 speech density
+def speech_window(seconds: float, sp: dict) -> tuple[float, float]:
+    """(first word s, last word deadline s) for a clip of this length."""
+    end = seconds - sp["end_margin_s"]
+    if seconds <= sp["train_window_s"] + 1e-6:
+        end = min(end, sp["window_speech_end_s"])
+    return sp["start_s"], end
+
+
+def density(script: Script, prof: dict) -> dict:
+    sp = prof["planner"]["speech"]
+    lo, hi = sp["wps"]
+    rows, errors = [], []
+    for c in script.clips:
+        t0, t1 = speech_window(c.seconds, sp)
+        avail = max(0.1, t1 - t0)
+        words = sum(len(ln.text.split()) for ln in c.lines)
+        band = [math.ceil(lo * avail), math.floor(hi * avail)]
+        est_last = t0 + words / sp["wps_nominal"]
+        # line timings at the nominal rate (used for the prompt time codes)
+        t, times = t0, []
+        for ln in c.lines:
+            d = len(ln.text.split()) / sp["wps_nominal"]
+            times.append([round(t, 2), round(t + d, 2)])
+            t += d
+        row = {"clip": c.idx, "seconds": c.seconds, "words": words, "band": band, "wps": round(words / avail, 2),
+               "first_word_s": t0, "deadline_s": round(t1, 2), "est_last_word_s": round(est_last, 2), "line_times": times}
+        rows.append(row)
+        if not band[0] <= words <= band[1]:
+            kind = "too_few_words (leftover time invites invented words)" if words < band[0] else "too_many_words (rushed, clipped endings)"
+            errors.append({"where": f"clip {c.idx}", "type": kind, "severity": "fail", "words": words, "band": band})
+        if est_last > t1 + sp["deadline_tolerance_s"]:
+            errors.append({"where": f"clip {c.idx}", "type": "last_word_late", "severity": "fail",
+                           "est_last_word_s": round(est_last, 2), "deadline_s": round(t1, 2)})
+    warnings = []
+    hk = prof["planner"].get("hook") or {}
+    if hk.get("first_line_by_s") and rows and rows[0]["line_times"] and rows[0]["line_times"][0][1] > hk["first_line_by_s"]:
+        warnings.append({"where": "line 1 of clip 1", "type": "slow_hook", "severity": "warn",
+                         "note": f"first line ends at about {rows[0]['line_times'][0][1]} s; the profile wants the promise by {hk['first_line_by_s']} s"})
+    return {"clips": rows, "errors": errors, "warnings": warnings}
+
+
+# ---------------------------------------------------------------- P3 angle plan
+def angle_plan(script: Script, prof: dict) -> dict:
+    ap = prof["planner"]["angles"]
+    clips = script.clips
+    dur = sum(c.seconds for c in clips)
+    lo_f, hi_f = (x * dur / 180.0 for x in ap["changes_per_3min"])
+    band = [math.floor(lo_f + 0.02), max(math.ceil(hi_f - 0.02), math.floor(lo_f + 0.02))]   # 0.02 absorbs 29.96 s clips
+    nj = len(clips) - 1
+    want = min(nj, max(band[0], math.ceil((lo_f + hi_f) / 2 - 0.02)))
+    terms = {c.idx: Counter(w for ln in c.lines for w in content_words(ln.text)) for c in clips}
+
+    def shift(k):  # topic shift at join k (between clips[k-1] and clips[k]) = 1 - Jaccard of content words
+        a, b = set(terms[clips[k - 1].idx]), set(terms[clips[k].idx])
+        return 1 - len(a & b) / max(1, len(a | b))
+
+    seq = ap["sequence"]
+    choice: tuple = ()
+    if want > 0 and ap["mode"] != "none":
+        open_k = min(ap["min_open_clips"], nj)
+        for gap in range(ap["min_clips_between"], 0, -1):
+            valid = []
+            for c in combinations(range(1, nj + 1), want):
+                book = ap["bookend"] and want >= 2
+                inner = c[:-1] if book else c          # the bookend cut back to set-up A is exempt from the gap rule
+                if c[0] < open_k or any(b - a < gap for a, b in zip(inner, inner[1:])):
+                    continue
+                if book and c[-1] != nj:
+                    continue
+                valid.append(c)
+            if valid:
+                choice = max(valid, key=lambda c: (sum(shift(k) for k in c), [-k for k in c]))
+                break
+    setup_of, k = {}, 0
+    for i, c in enumerate(clips):
+        if i in choice:
+            k += 1
+        s = seq[min(k, len(seq) - 1)]
+        if ap["bookend"] and len(choice) >= 2 and i >= choice[-1]:
+            s = seq[0]
+        setup_of[c.idx] = s
+    rows, run_side, prev = [], {}, None
+    for c in clips:
+        s = setup_of[c.idx]
+        changed = prev is not None and s != prev
+        if changed or prev is None:
+            run_side[s] = c.side or ap["default_side"]
+        text = ap["setups"][s].format(side=run_side[s])
+        if prev is None:
+            pic = "first shot"
+        elif ap["mode"] == "punch_in":
+            pic = "same camera; the editor punches in" if s != seq[0] else "same camera"
+        elif changed:
+            pic = "new set-up: no last-frame chaining; the set-up reference still is the framing picture"
+        else:
+            pic = "same set-up: chain the colour-corrected last frame of the previous clip"
+        rows.append({"clip": c.idx, "setup": s, "text": text, "change_from_prev": changed, "picture3": pic,
+                     "punch_in": ap["mode"] == "punch_in" and s != seq[0]})
+        prev = s
+    n_changes = sum(r["change_from_prev"] for r in rows)
+    errors = [] if band[0] <= n_changes <= band[1] or ap["mode"] == "none" else [
+        {"where": "film", "type": "angle_changes_out_of_band", "severity": "fail", "changes": n_changes, "band": band}]
+    return {"band": band, "changes": n_changes, "joins": [clips[k].idx for k in choice], "clips": rows, "errors": errors,
+            "mode": ap["mode"], "rule": "one locked camera per clip; a change is a hard cut at a clip join (sentence end)"}
+
+
+# ---------------------------------------------------------------- P4 gesture budget
+def gesture_plan(script: Script, prof: dict) -> dict:
+    gp = prof["planner"]["gestures"]
+    types = gp["types"]
+    n_lines = sum(len(c.lines) for c in script.clips)
+    max_total = round(gp["density"] * n_lines)
+    starts, t = {}, 0.0
+    for c in script.clips:
+        starts[c.idx] = t
+        t += c.seconds
+    dens = {r["clip"]: r["line_times"] for r in density(script, prof)["clips"]}
+    cands = []
+    for c in script.clips:
+        for n, ln in enumerate(c.lines, 1):
+            for g, spec in types.items():
+                if re.search(spec["cue"], ln.text, re.I):
+                    cands.append((c.idx, n, g, starts[c.idx] + dens[c.idx][n - 1][0]))
+    order = list(types)
+    used, last_t, per_clip, pick = Counter(), {}, Counter(), {}
+    finger = set(gp["finger_types"])
+    for cid, n, g, tf in sorted(cands, key=lambda x: (order.index(x[2]), x[3])):
+        if (cid, n) in pick or used[g] >= types[g]["budget"] or sum(used.values()) >= max_total:
+            continue
+        if g in last_t and tf - last_t[g] < gp["min_gap_s"]:
+            continue
+        if per_clip[cid] >= gp["max_per_clip"]:
+            continue
+        if g in finger and sum(used[x] for x in finger) >= gp["finger_max"]:
+            continue
+        pick[(cid, n)] = g
+        used[g] += 1
+        last_t[g] = tf
+        per_clip[cid] += 1
+    rows = []
+    for c in script.clips:
+        for n, ln in enumerate(c.lines, 1):
+            g = pick.get((c.idx, n))
+            m = re.search(r"\b(two|three|four)\b", ln.text.lower())
+            rows.append({"clip": c.idx, "line": n, "type": g or "rest",
+                         "wording": types[g]["wording"].format(n=m.group(1) if m else "two") if g else gp["rest"]})
+    errors = [{"where": "film", "type": f"gesture_over_budget:{g}", "severity": "fail"} for g in used if used[g] > types[g]["budget"]]
+    if sum(used[x] for x in finger) > gp["finger_max"]:
+        errors.append({"where": "film", "type": "too_many_finger_shapes", "severity": "fail"})
+    return {"used": dict(used), "total": sum(used.values()), "lines": n_lines, "max_total": max_total, "lines_plan": rows, "errors": errors}
+
+
+# ---------------------------------------------------------------- P5 colour anchor
+def lab_stats_image(path: str | Path) -> dict:
+    """Lab mean/std of one image (decoded by ffmpeg, 320x180)."""
+    from .colour import frames_rgb, lab_stats
+
+    return lab_stats(list(frames_rgb(str(path), step=1)))
+
+
+def colour_plan(prof: dict, anchor_still: str | None = None) -> dict:
+    cp = prof["planner"]["color"]
+    out = {"anchor": "still" if anchor_still else cp["anchor"], "method": prof["editor"]["color"]["method"], "gates": cp["gates"],
+           "pre_render": "match the chained seed frame to the anchor before it becomes the next clip's framing picture",
+           "post": "per-clip LUT to the anchor in the editor (olv edit), before the join"}
+    if anchor_still:
+        out["anchor_path"] = Path(anchor_still).name
+        try:
+            out["target"] = lab_stats_image(anchor_still)
+        except Exception as e:  # ffmpeg missing or unreadable image: the editor falls back to clip 1
+            out["target"] = None
+            out["note"] = f"anchor still not measured ({e}); the editor uses clip {prof['editor']['color']['anchor_clip']}"
+    return out
+
+
+# ---------------------------------------------------------------- P6 prompts
+def build_prompts(script: Script, prof: dict, dens: dict, angles: dict, gestures: dict) -> list[dict]:
+    sp, pp = script.speaker, prof["planner"]["prompt"]
+    tag, lang = sp.get("tag", "S1"), sp.get("language", "English")
+    role = sp.get("role", "the speaker")
+    out = []
+    for i, c in enumerate(script.clips):
+        a = angles["clips"][i]
+        parts = []
+        if script.scene.get("refs"):
+            parts.append(script.scene["refs"].strip())
+        if i > 0:
+            if a["change_from_prev"] and angles["mode"] == "generate":
+                parts.append(pp["picture_setup"].format(setup=a["setup"]))
+            elif not a["change_from_prev"] or angles["mode"] != "generate":
+                parts.append(pp["picture_chain"])
+        if sp.get("description"):
+            parts.append(sp["description"].strip())
+        if script.scene.get("description"):
+            parts.append(script.scene["description"].strip())
+        framing = a["text"] if angles["mode"] == "generate" else angles["clips"][0]["text"]
+        parts.append(f"The camera frames {role} in a {framing}.")
+        parts.append(pp["camera_tail"])
+        times = dens["clips"][i]["line_times"]
+        gl = [g for g in gestures["lines_plan"] if g["clip"] == c.idx]
+        beats = [P.Beat(t=times[n][0], action=f"{role} {gl[n]['wording']}", line=ln.text, speaker=tag, language=lang) for n, ln in enumerate(c.lines)]
+        scene = P.Scene(description=" ".join(parts), sound=script.scene.get("sound", ""), beats=beats,
+                        end_silence_s=prof["planner"]["speech"]["end_margin_s"], voice_ref=bool(sp.get("voice_ref", True)))
+        text = P.build(scene, c.seconds, trigger=pp.get("trigger") or None)
+        problems = P.lint(text, c.seconds, max_wps=prof["planner"]["speech"]["lint_max_wps"])
+        out.append({"clip": c.idx, "seconds": c.seconds, "prompt": text, "words": len(text.split()), "lint": problems})
+    return out
+
+
+# ---------------------------------------------------------------- the plan
+def plan(script: Script, prof: dict, anchor_still: str | None = None) -> dict:
+    tp = text_pass(script, prof)          # mutates line text (clean) before everything else reads it
+    dens = density(script, prof)
+    angles = angle_plan(script, prof)
+    gestures = gesture_plan(script, prof)
+    colour = colour_plan(prof, anchor_still)
+    prompts = build_prompts(script, prof, dens, angles, gestures)
+    gates = [
+        {"id": "G1", "gate": "no banned fake action left", "pass": not [e for e in tp["errors"] if e["type"].startswith("banned_")]},
+        {"id": "G2", "gate": "no repeated sentence", "pass": not [e for e in tp["errors"] if e["type"] == "repeated_sentence"]},
+        {"id": "G3", "gate": "words per clip inside the band", "pass": not [e for e in dens["errors"] if "words" in e["type"]]},
+        {"id": "G4", "gate": "estimated last word by the deadline", "pass": not [e for e in dens["errors"] if e["type"] == "last_word_late"]},
+        {"id": "G5", "gate": "angle changes inside the band, only at clip joins", "pass": not angles["errors"]},
+        {"id": "G6", "gate": "gesture budget and finger cap kept", "pass": not gestures["errors"]},
+        {"id": "G7", "gate": "every prompt lint clean", "pass": all(not p["lint"] for p in prompts)},
+    ]
+    film = {"title": script.title, "profile": prof["name"], "clips": len(script.clips), "duration_s": round(sum(c.seconds for c in script.clips), 2),
+            "angle_changes": angles["changes"], "gestures": gestures["total"], "lines": gestures["lines"]}
+    return {"version": 1, "film": film, "gates": gates, "gates_pass": all(g["pass"] for g in gates),
+            "text_pass": tp, "density": dens, "angles": angles, "gestures": gestures, "color": colour,
+            "clips": [{"clip": c.idx, "title": c.title, "seconds": c.seconds, "lines": [ln.text for ln in c.lines]} for c in script.clips],
+            "prompts": prompts}
+
+
+def write(plan_d: dict, out_dir: str | Path) -> Path:
+    out = Path(out_dir)
+    (out / "prompts").mkdir(parents=True, exist_ok=True)
+    for p in plan_d["prompts"]:
+        (out / "prompts" / f"clip{p['clip']}.txt").write_text(p["prompt"] + "\n")
+        (out / "prompts" / f"clip{p['clip']}.lines.txt").write_text(" ".join(next(c["lines"] for c in plan_d["clips"] if c["clip"] == p["clip"])) + "\n")
+    (out / "plan.json").write_text(json.dumps(plan_d, indent=1))
+    return out / "plan.json"
+
+
+def summary(plan_d: dict) -> dict:
+    return {"plan_gates_pass": plan_d["gates_pass"], "failed": [g["id"] + " " + g["gate"] for g in plan_d["gates"] if not g["pass"]],
+            "errors": [e for part in ("text_pass", "density", "angles", "gestures") for e in plan_d[part]["errors"]],
+            "angle_setups": [a["setup"] for a in plan_d["angles"]["clips"]], "gestures_used": plan_d["gestures"]["used"],
+            "words_per_clip": [r["words"] for r in plan_d["density"]["clips"]],
+            "band": plan_d["density"]["clips"][0]["band"] if plan_d["density"]["clips"] else None,
+            "fixes": len(plan_d["text_pass"]["fixes"]), "warnings": len(plan_d["text_pass"]["warnings"]) + len(plan_d["density"].get("warnings", []))}

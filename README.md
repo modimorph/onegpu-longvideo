@@ -20,6 +20,7 @@ These are our observations, not requirements. Numbers are n = 1 unless stated. S
 Every video follows the same 12 steps: script, prompt, assets, recipe, render, best of several seeds, first QA pass, upscale, edit, voice, finish, final QA.
 Each step has a pass gate. Start from `configs/flow.default.yaml`, tick [docs/FLOW-CHECKLIST.md](docs/FLOW-CHECKLIST.md) per video, and run `olv flow-check <run folder>` at the end.
 Steps the repo cannot run yet are marked manual. Full flow: **[docs/FLOW.md](docs/FLOW.md)**.
+A planner wraps steps 1-2 (`olv plan`: the whole script first, then one prompt per clip) and an editor wraps steps 9, 11 and 12 (`olv edit`: word check, cuts, colour match, -14 LUFS, 7x6 contact sheet). Both follow a scenario profile: talking head, tutorial, podcast, cinematic short, ad or documentary. See [docs/PLANNER.md](docs/PLANNER.md) and [docs/EDITOR.md](docs/EDITOR.md).
 
 ## How it works
 
@@ -47,10 +48,11 @@ flowchart LR
 ```bash
 git clone https://github.com/modimorph/onegpu-longvideo && cd onegpu-longvideo
 pip install -e ".[dev]"          # pure-Python parts; tests run on CPU
-pytest -q                        # 49 tests, no GPU
+pytest -q                        # 72 tests, no GPU (the editor tests need ffmpeg)
 
 olv graph configs/talking_head_30s.yaml --out graph.json   # build the ComfyUI API graph (no GPU)
 olv lint configs/prompts/podcast_host.txt                  # check a prompt
+olv plan configs/scripts/example_talking_head.yaml --profile talking_head --out plan/   # whole-film plan + prompts
 ```
 
 To render you need a ComfyUI install with the MiniMax-H3 nodes and your own model weights:
@@ -101,6 +103,10 @@ Prompt rules that mattered in our runs: continuous speech with no planned silenc
 | `voice` | voice post: sample-exact length, envelope lag per window, WER guard |
 | `camera` | camera-path estimate and plan check |
 | `flow` | `olv flow-check`: validate a run folder against the flow gates |
+| `planner` | `olv plan`: text pass, speech density, angle plan, gesture budget, colour anchor, prompts per clip |
+| `editor` | `olv edit`: word check, cut list, colour match, assembly, loudness, contact sheet, QA gates |
+| `colour` | Lab statistics, Reinhard transfer as a 3D LUT, dE76 |
+| `profiles` | scenario profiles (`configs/profiles/*.yaml`) merged over the base |
 | `timing` | stage timing log, GPU memory sampler, torch profiler helper |
 
 ## What we tried and what happened

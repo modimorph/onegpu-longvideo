@@ -1,0 +1,20 @@
+# Documentary interview: waist-up medium shots, close-ups for emphasis only (R-DO2); continuous talking head 20-40 s at most,
+# then a change (R-DO1); slower, measured speech; lower thirds for each speaker (R-DO2). L/J cuts need B-roll the generator
+# does not make yet: listed as a gap in docs/EDITOR.md.
+description: "Documentary interview"
+planner:
+  speech: {wps: [2.4, 2.9], wps_nominal: 2.65}
+  hook: {first_line_by_s: 10}
+  angles:
+    changes_per_3min: [3, 5]
+    min_open_clips: 1
+    min_clips_between: 1
+    sequence: [A, B, A, C, A, B, A]
+    setups:
+      A: "waist-up medium shot, the subject sits slightly off-centre and looks just past the lens toward an unseen interviewer"
+      B: "close-up from the same side, head and shoulders, for emphasis"
+      C: "wider shot showing the subject in their place of work"
+  gestures: {density: 0.35}
+editor:
+  pacing: {max_shot_s: 40}
+  titles: {lower_third: true, start_s: 1.5, hold_s: 4.0}

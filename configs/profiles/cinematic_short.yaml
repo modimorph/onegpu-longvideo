@@ -1,0 +1,23 @@
+# Cinematic short: story first, sparse dialogue, a new shot at every clip join (each clip is one shot).
+# Murch rule of six: emotion and story outrank rhythm and eye-trace when choosing a cut (R-ED5); keep the 180-degree line and
+# change angle by at least 30 degrees at a cut (R-AN3). Shots: establishing wide, medium, close-up.
+description: "Cinematic short (story, sparse dialogue)"
+planner:
+  speech: {wps: [1.2, 2.8], wps_nominal: 2.4, end_margin_s: 2.0}
+  hook: {first_line_by_s: 15}
+  angles:
+    changes_per_3min: [9, 18]
+    min_open_clips: 1
+    min_clips_between: 1
+    bookend: false
+    sequence: [A, B, C, B, A, C, B, C, A, B, C, A]
+    setups:
+      A: "wide establishing shot, the whole set visible, characters small in frame, eye level"
+      B: "medium shot, waist up, 30 degrees off the axis of the previous shot, same side of the action line"
+      C: "close-up on the face, shallow depth of field, same side of the action line"
+  gestures:
+    density: 0.3
+    rest: "stays in the moment, small natural movement only"
+editor:
+  cuts: {internal: false}
+  titles: {lower_third: false}
