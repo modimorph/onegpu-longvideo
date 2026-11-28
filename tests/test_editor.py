@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 
@@ -204,3 +205,29 @@ def test_cut_logic_fuzz_never_cuts_inside_a_word():
         segs = ED.cut_list(words, t + random.uniform(0, 1), f, TH)["segments"]
         assert not ED.cuts_in_silence(words, segs)
         assert all(a < b for a, b in segs) and all(b0 <= a1 for (_, b0), (a1, _) in zip(segs, segs[1:]))
+
+
+
+def test_caption_cues_follow_reading_rules():
+    words = [{"w": w, "t0": i * 0.3, "t1": i * 0.3 + 0.25} for i, w in enumerate(
+        "This is a fairly long sentence that should be split into readable caption lines. And here is a second one.".split())]
+    cues = ED.caption_cues(words)
+    assert all(len(x) <= 42 for c in cues for x in c["lines"]) and all(len(c["lines"]) <= 2 for c in cues)
+    assert all(sum(len(x) for x in c["lines"]) / (c["t1"] - c["t0"]) <= 20.5 or c is cues[-1] for c in cues)
+    assert all(a["t1"] < b["t0"] for a, b in zip(cues, cues[1:]))
+    # a cue that must break ends at punctuation when there is one in its second half
+    w2 = [{"w": w, "t0": i * 0.3, "t1": i * 0.3 + 0.25} for i, w in enumerate(
+        "Hi. Quick thing first, I'm generated, and this shot came off one gaming graphics card. No cuts at all.".split())]
+    assert all(re.search(r"[,.?!]$", c["lines"][-1]) for c in ED.caption_cues(w2))
+
+
+@pytest.mark.skipif(not HAS_FF, reason="needs ffmpeg")
+def test_captions_burned_and_srt_written(tmp_path):
+    _clip2(tmp_path / "clip1" / "video.mp4", seed=4)
+    heard = _w("captions should appear on screen for viewers who watch without sound", t=0.1, d=0.15, gap=0.05)
+    win = [{"window": [0, 3], "wer": 0, "invented": 0}]
+    (tmp_path / "clip1" / "wer.json").write_text(json.dumps({"wer": 0, "win_wer": [0], "windows": win, "words": heard}))
+    qa = ED.edit(tmp_path, None, profiles.load("ad"), tmp_path / "o", title="50% off")
+    assert qa["captions"]["burned"] and (tmp_path / "o" / "captions.srt").read_text().startswith("1\n00:00:00,")
+    assert "subtitles=" in " ".join(qa["ffmpeg_assemble"]), qa["ffmpeg_assemble"]
+    assert qa["titles"]["lower_third"] and not any("skipped" in w for w in qa.get("warnings", []))

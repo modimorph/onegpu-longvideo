@@ -183,6 +183,77 @@ def cuts_in_silence(words: list[dict], segments: list[list[float]], tol: float =
     return bad
 
 
+# ---------------------------------------------------------------- captions
+def caption_cues(words: list[dict], max_chars: int = 42, max_lines: int = 2, max_cps: float = 20.0,
+                 min_s: float = 0.8, max_s: float = 6.0) -> list[dict]:
+    """Group timed words (final timeline) into subtitle cues: at most `max_lines` lines of `max_chars` characters,
+    reading speed at most `max_cps` characters per second (Netflix English style guide: 42 chars, 2 lines, 20 cps)."""
+    cues, cur = [], []
+
+    def lines_of(ws):
+        out, line = [], ""
+        for w in ws:
+            t = w["w"].strip()
+            if line and len(line) + 1 + len(t) > max_chars:
+                out.append(line)
+                line = t
+            else:
+                line = f"{line} {t}".strip()
+        return out + ([line] if line else [])
+
+    def flush():
+        if not cur:
+            return
+        text = lines_of(cur)
+        t0, t1 = cur[0]["t0"], cur[-1]["t1"]
+        need = sum(len(x) for x in text) / max_cps
+        cues.append({"t0": t0, "t1": max(t1, t0 + min_s, t0 + need), "lines": text})
+        cur.clear()
+
+    for w in words:
+        trial = cur + [w]
+        too_long = len(lines_of(trial)) > max_lines or (trial[-1]["t1"] - trial[0]["t0"]) > max_s
+        gap = cur and w["t0"] - cur[-1]["t1"] > 0.7
+        if cur and (too_long or gap):
+            # break at the last punctuation in the cue (after at least 2 words), not in the middle of a phrase
+            cut = next((j for j in range(len(cur) - 1, 0, -1) if re.search(r"[,.?!;:]$", cur[j]["w"].strip())), None)
+            if too_long and cut is not None and cut < len(cur) - 1:
+                rest = cur[cut + 1:]
+                del cur[cut + 1:]
+                flush()
+                cur.extend(rest)
+            else:
+                flush()
+        cur.append(w)
+        if re.search(r"[.?!]$", w["w"].strip()) and len(" ".join(x["w"] for x in cur)) > max_chars * 0.6:
+            flush()            # end a cue at a sentence end once it holds enough text
+    flush()
+    for a, b in zip(cues, cues[1:]):   # no overlap: a cue ends before the next one starts
+        a["t1"] = min(a["t1"], b["t0"] - 0.04)
+    return cues
+
+
+def write_srt(cues: list[dict], path: Path) -> None:
+    def ts(t):
+        t = max(0.0, t)
+        return f"{int(t // 3600):02d}:{int(t % 3600 // 60):02d}:{int(t % 60):02d},{int(round((t % 1) * 1000)) % 1000:03d}"
+    path.write_text("".join(f"{i}\n{ts(c['t0'])} --> {ts(c['t1'])}\n" + "\n".join(c["lines"]) + "\n\n" for i, c in enumerate(cues, 1)))
+
+
+def final_words(qa: dict, fps: float) -> list[dict]:
+    """Heard words that survive the cut, moved onto the final timeline."""
+    out, t = [], 0.0
+    for c in qa["clips"]:
+        cfps = c.get("fps") or fps
+        for f0, f1, n_out in c["segments_frames"]:
+            a, b = f0 / cfps, f1 / cfps
+            for w in c.get("_words", []):
+                if a <= w["t0"] and w["t1"] <= b + 0.05:
+                    out.append({"w": w["w"], "t0": round(t + w["t0"] - a, 3), "t1": round(t + min(w["t1"], b) - a, 3)})
+            t += n_out / fps
+    return out
+
+
 # ---------------------------------------------------------------- helpers
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     r = subprocess.run(cmd, capture_output=True, text=True)
@@ -249,7 +320,7 @@ def av_check(qa: dict, final: str, fps: float) -> dict:
 
 # ---------------------------------------------------------------- the edit
 def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Path, dry_run: bool = False, require_wer: bool = True,
-         title: str = "", subtitle: str = "", wer_dir: str | Path | None = None) -> dict:
+         title: str = "", subtitle: str = "", wer_dir: str | Path | None = None, captions: bool | None = None) -> dict:
     ed = prof["editor"]
     out = Path(out_dir)
     clips = find_clips(clips_dir, wer_dir)
@@ -280,6 +351,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         if bad:
             errors.append({"where": f"clip {c['clip']}", "type": "cut_inside_speech", "severity": "fail", "t": bad})
         prev_tokens = [_norm(w["w"]) for w in words][-40:]
+        c["_words"] = words
         qa["clips"].append({**c, **info, "flaws": [{"kind": f["kind"], "t0": words[f["i0"]]["t0"], "t1": words[f["i1"] - 1]["t1"]} for f in flaws],
                             **cl, "punch_in": punch.get(c["clip"], False)})
 
@@ -425,6 +497,18 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                   f"box=1:boxcolor=black@0.55:boxborderw={int(H * 0.01)}:{en}[vt]")
         vlast = "[vt]"
     qa["titles"] = {"lower_third": bool(title), "title_chars": len(title or "")}
+    cues = caption_cues(final_words(qa, fps), **ed["captions"]["style"])
+    srt = out / "captions.srt"
+    if cues:
+        write_srt(cues, srt)          # sidecar for the upload page, also when not burned in
+    burn = (lt.get("captions") if captions is None else captions) and bool(cues)
+    if burn:
+        sty = ed["captions"]["burn"]
+        style = (f"FontName={sty['font']},FontSize={sty['size']},PrimaryColour=&H00FFFFFF,BackColour=&H80000000,"
+                 f"BorderStyle=3,Outline=1,Shadow=0,MarginV={sty['margin_v']},Alignment=2")
+        fc.append(f"{vlast}subtitles=filename='{srt}':force_style='{style}'[vs]")
+        vlast = "[vs]"
+    qa["captions"] = {"cues": len(cues), "srt": str(srt) if cues else None, "burned": bool(burn)}
     enc = ed["encode"]
     assembled = out / "assembled.mkv"
     cmd = ["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", ";".join(fc), "-map", vlast, "-map", "[ac]",
@@ -435,16 +519,21 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                          "lut": bool(c.get("cube") or c.get("ramp"))} for c in qa["clips"]]}  # frame-exact ranges are added to edit_qa.json (segments_frames)
     (out / "edl.json").write_text(json.dumps(edl, indent=1))
     if dry_run:
+        for c in qa["clips"]:
+            c.pop("_words", None)
         qa["dry_run"] = True
         (out / "edit_qa.json").write_text(json.dumps(qa, indent=1, default=str))
         return qa
     try:
         _run(cmd)
     except RuntimeError as e:
-        if vlast == "[vt]":   # drawtext missing or no font: finish without the lower third, report it
+        title_stmt = next((x for x in fc if x.endswith("[vt]")), None)
+        if title_stmt:   # drawtext missing or no font: finish without the lower third, report it
             qa.setdefault("warnings", []).append(f"lower third skipped: {str(e)[-200:]}")
-            cmd[cmd.index("-filter_complex") + 1] = ";".join(fc[:-1])
-            cmd[cmd.index("[vt]")] = "[vc]"
+            fc2 = [x.replace("[vt]subtitles", "[vc]subtitles") for x in fc if x is not title_stmt]
+            cmd[cmd.index("-filter_complex") + 1] = ";".join(fc2)
+            if "[vt]" in cmd:
+                cmd[cmd.index("[vt]")] = "[vc]"
             _run(cmd)
             qa["titles"]["lower_third"] = False
         else:
@@ -571,6 +660,8 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     qa["human"] = "open contact_sheet.jpg and watch final.mp4; record qa.contact_sheet_reviewed = true in flow_run.json"
     if plan:
         qa["plan"] = {"angle_changes": plan.get("film", {}).get("angle_changes"), "gestures": plan.get("film", {}).get("gestures")}
+    for c in qa["clips"]:
+        c.pop("_words", None)
     assembled.unlink(missing_ok=True)
     shutil.rmtree(tmp, ignore_errors=True)
     (out / "edit_qa.json").write_text(json.dumps(qa, indent=1, default=str))

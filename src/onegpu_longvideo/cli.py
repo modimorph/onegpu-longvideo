@@ -132,7 +132,7 @@ def cmd_edit(a):
     prof = profiles.load(a.profile or (plan or {}).get("film", {}).get("profile") or "talking_head")
     try:
         qa = ED.edit(a.clips_dir, plan, prof, a.out, dry_run=a.dry_run, require_wer=not a.no_wer, title=a.title or "", subtitle=a.subtitle or "",
-                     wer_dir=a.wer_dir)
+                     wer_dir=a.wer_dir, captions=a.captions)
     except (FileNotFoundError, ValueError) as e:
         sys.exit(f"olv edit: {e}")
     print(json.dumps(ED.summary(qa)))
@@ -196,6 +196,8 @@ def main(argv=None):
     s.add_argument("clips_dir"); s.add_argument("--plan"); s.add_argument("--profile"); s.add_argument("--out", default="edit")
     s.add_argument("--title"); s.add_argument("--subtitle"); s.add_argument("--dry-run", action="store_true")
     s.add_argument("--wer-dir", help="folder with clipN.wer.json files (keeps the clip folders clean)")
+    s.add_argument("--captions", dest="captions", action="store_true", default=None, help="burn captions in (default: the profile)")
+    s.add_argument("--no-captions", dest="captions", action="store_false", help="do not burn captions in (captions.srt is still written)")
     s.add_argument("--no-wer", action="store_true", help="allow clips without wer.json (G8 then only covers checked clips)"); s.set_defaults(fn=cmd_edit)
     s = sub.add_parser("profiles", help="list scenario profiles"); s.set_defaults(fn=cmd_profiles)
     s = sub.add_parser("calibrate", help="measured speaking rate of rendered clips vs the plan; suggests a speech band")
