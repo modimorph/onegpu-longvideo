@@ -245,10 +245,10 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
          title: str = "", subtitle: str = "", wer_dir: str | Path | None = None) -> dict:
     ed = prof["editor"]
     out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
     clips = find_clips(clips_dir, wer_dir)
     if not clips:
         raise FileNotFoundError(f"no clipN/video.mp4 or clipN.mp4 in {clips_dir}")
+    out.mkdir(parents=True, exist_ok=True)
     plan = plan or {}
     ref_lines = {c["clip"]: " ".join(c["lines"]) for c in plan.get("clips", [])}
     punch = {a["clip"]: a.get("punch_in", False) for a in plan.get("angles", {}).get("clips", [])}

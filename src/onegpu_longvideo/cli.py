@@ -92,9 +92,12 @@ def cmd_plan(a):
     from . import planner as PL
     from . import profiles
 
-    prof = profiles.load(a.profile)
-    sc = PL.load_script(a.script, clip_seconds=a.clip_seconds, scene_path=a.scene)
-    sc.facts += PL.load_facts(a.facts)
+    try:
+        prof = profiles.load(a.profile)
+        sc = PL.load_script(a.script, clip_seconds=a.clip_seconds, scene_path=a.scene)
+        sc.facts += PL.load_facts(a.facts)
+    except (FileNotFoundError, ValueError, KeyError) as e:
+        sys.exit(f"olv plan: {e}")
     plan = PL.plan(sc, prof, anchor_still=a.anchor_still)
     path = PL.write(plan, a.out)
     if a.llm:
@@ -113,8 +116,11 @@ def cmd_edit(a):
 
     plan = json.loads(Path(a.plan).read_text()) if a.plan else None
     prof = profiles.load(a.profile or (plan or {}).get("film", {}).get("profile") or "talking_head")
-    qa = ED.edit(a.clips_dir, plan, prof, a.out, dry_run=a.dry_run, require_wer=not a.no_wer, title=a.title or "", subtitle=a.subtitle or "",
-                 wer_dir=a.wer_dir)
+    try:
+        qa = ED.edit(a.clips_dir, plan, prof, a.out, dry_run=a.dry_run, require_wer=not a.no_wer, title=a.title or "", subtitle=a.subtitle or "",
+                     wer_dir=a.wer_dir)
+    except (FileNotFoundError, ValueError) as e:
+        sys.exit(f"olv edit: {e}")
     print(json.dumps(ED.summary(qa)))
     sys.exit(0 if a.dry_run or qa["gates_pass"] else 1)
 

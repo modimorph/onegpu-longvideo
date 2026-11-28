@@ -155,3 +155,15 @@ def test_out_point_follows_the_last_kept_word():
     heard = _w("we ship it today um")
     cl = ED.cut_list(heard, 5.0, ED.find_flaws(heard, "we ship it today"), TH)
     assert len(cl["segments"]) == 1 and cl["out"] == pytest.approx(heard[3]["t1"] + 0.25)
+
+
+def test_cli_errors_are_clean(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["edit", str(tmp_path / "nothing"), "--out", str(tmp_path / "o")])
+    assert "no clipN" in str(e.value.code) and not (tmp_path / "o").exists()
+    with pytest.raises(SystemExit) as e:
+        cli.main(["plan", str(tmp_path / "missing.yaml"), "--out", str(tmp_path / "p")])
+    assert "olv plan" in str(e.value.code)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["plan", str(tmp_path / "missing.yaml"), "--profile", "no_such_profile"])
+    assert "profile not found" in str(e.value.code)
