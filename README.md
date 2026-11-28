@@ -56,7 +56,7 @@ olv lint configs/prompts/podcast_host.txt                  # check a prompt
 To render you need a ComfyUI install with the MiniMax-H3 nodes and your own model weights:
 
 1. Get the weights yourself and accept each licence (see "Models and licences"). File names go in the recipe under `models:`.
-2. Copy `comfyui_nodes/onegpu_nodes.py` into `ComfyUI/custom_nodes/` and restart ComfyUI (or set `ffn_chunk_tokens: 0`).
+2. Copy `comfyui_nodes/onegpu_nodes.py` and `comfyui_nodes/onegpu_upscale.py` into `ComfyUI/custom_nodes/` and restart ComfyUI (or set `ffn_chunk_tokens: 0` and `upscale_in_graph: false`).
 3. Start ComfyUI, then:
 
 ```bash

@@ -3,7 +3,8 @@
 OLVUpscaleVideoSave(images, audio, upscale_model, width, height, fps, quality, filename_prefix)
   images: the VAE decode output (IMAGE, float 0..1, [T, H, W, 3]); audio: the VAE audio decode (AUDIO).
   Same math as src/onegpu_longvideo/upscale.py: SPAN (spandrel) fp16 -> bicubic antialias resize in fp32 ->
-  clamp*255, round, uint8 -> h264_nvenc p5 vbr cq <quality>. Audio is muxed as AAC 192k.
+  clamp*255, round, uint8 -> h264_nvenc p5 vbr cq <quality>. Audio is muxed as AAC 192k. Input frames are rounded
+  to rgb24 levels first (like the decoded raw take); save_raw also writes the 720p take for the flow's raw-take QA.
   Batches of 8 frames; D2H through pinned slots on a copy stream while the next batch computes; a writer
   thread feeds ffmpeg. Output: <ComfyUI output>/<prefix>_NNNNN_.mp4, reported like SaveVideo.
 Install: copy into ComfyUI/custom_nodes/. Inert unless a graph uses it.
@@ -44,14 +45,15 @@ class OLVUpscaleVideoSave:
                              "height": ("INT", {"default": 1080, "min": 64, "max": 8192}),
                              "fps": ("FLOAT", {"default": 24.0}),
                              "quality": ("INT", {"default": 18, "min": 0, "max": 51}),
-                             "filename_prefix": ("STRING", {"default": "onegpu/up"})}}
+                             "filename_prefix": ("STRING", {"default": "onegpu/up"}),
+                             "save_raw": ("BOOLEAN", {"default": True})}}
 
     RETURN_TYPES = ()
     OUTPUT_NODE = True
     FUNCTION = "run"
     CATEGORY = "onegpu"
 
-    def run(self, images, audio, upscale_model, width, height, fps, quality, filename_prefix):
+    def run(self, images, audio, upscale_model, width, height, fps, quality, filename_prefix, save_raw=True):
         import folder_paths
         out_dir, fname, counter, subfolder, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory())
         os.makedirs(out_dir, exist_ok=True)
@@ -59,10 +61,20 @@ class OLVUpscaleVideoSave:
         out = os.path.join(out_dir, file)
         wav = os.path.join(tempfile.gettempdir(), f"olv_up_{os.getpid()}_{counter}.wav")
         _write_wav(audio, wav)
+        import comfy.model_management as mm
+        mm.unload_all_models(); mm.soft_empty_cache()  # same as the separate-process path's /free: SPAN gets the VRAM
         model = _load(upscale_model)
+        raw_file = f"{fname}_{counter:05}_raw.mp4"
+        raw = None
+        if save_raw:  # 720p take for the raw-take QA of the required flow (steps 6-7), from the same uint8 frames
+            T0, H0, W0 = images.shape[0], images.shape[1], images.shape[2]
+            raw = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W0}x{H0}", "-r", str(fps), "-i", "-",
+                                    "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "19",
+                                    "-b:v", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", os.path.join(out_dir, raw_file)],
+                                   stdin=subprocess.PIPE)
         enc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps),
                                 "-i", "-", "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr",
-                                "-cq", str(quality), "-b:v", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-shortest",
+                                "-cq", str(quality), "-b:v", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
                                 "-map_metadata", "-1", "-metadata", "comment=AI-generated", "-movflags", "+faststart", out],
                                stdin=subprocess.PIPE)
         B = 8
@@ -94,8 +106,11 @@ class OLVUpscaleVideoSave:
             try:
                 with torch.inference_mode():
                     for i in range(0, T, B):
-                        x = images[i:i + B]
-                        t = x.to("cuda", non_blocking=True).permute(0, 3, 1, 2).half()
+                        x8 = images[i:i + B].mul(255).round_().clamp_(0, 255).to(torch.uint8)  # rgb24 levels, like the decoded raw take
+                        if raw is not None:
+                            raw.stdin.write(x8.numpy().tobytes())
+                        x = x8
+                        t = x.to("cuda", non_blocking=True).permute(0, 3, 1, 2).half().div_(255)
                         y = model(t)
                         y = F.interpolate(y.float(), size=(height, width), mode="bicubic", antialias=True)
                         ob = y.clamp_(0, 1).mul_(255).round_().byte().permute(0, 2, 3, 1).contiguous()
@@ -118,6 +133,12 @@ class OLVUpscaleVideoSave:
             except OSError as e:
                 werr.append(e)
             enc.wait()
+            if raw is not None:
+                try:
+                    raw.stdin.close()
+                except OSError:
+                    pass
+                raw.wait()
             try:
                 os.remove(wav)
             except OSError:
@@ -126,7 +147,12 @@ class OLVUpscaleVideoSave:
             raise RuntimeError(f"OLVUpscaleVideoSave writer failed: {werr[0]!r}")
         if enc.returncode:
             raise RuntimeError(f"OLVUpscaleVideoSave: ffmpeg exited with {enc.returncode}")
-        return {"ui": {"images": [{"filename": file, "subfolder": subfolder, "type": "output"}], "animated": (True,)}}
+        if raw is not None and raw.returncode:
+            raise RuntimeError(f"OLVUpscaleVideoSave: raw ffmpeg exited with {raw.returncode}")
+        items = [{"filename": file, "subfolder": subfolder, "type": "output"}]
+        if raw is not None:
+            items.append({"filename": raw_file, "subfolder": subfolder, "type": "output"})
+        return {"ui": {"images": items, "animated": (True,)}}
 
 
 NODE_CLASS_MAPPINGS = {"OLVUpscaleVideoSave": OLVUpscaleVideoSave}
