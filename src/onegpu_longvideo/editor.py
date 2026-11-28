@@ -183,6 +183,52 @@ def _loudnorm_pass1(path: str, au: dict) -> dict:
     return json.loads(r.stderr[r.stderr.rfind("{"):r.stderr.rfind("}") + 1])
 
 
+def _pcm(path: str, start: float, dur: float, sr: int = 8000):
+    import numpy as np
+
+    r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, start):.4f}", "-t", f"{dur:.4f}", "-i", path, "-map", "0:a:0",
+                        "-ac", "1", "-ar", str(sr), "-f", "f32le", "-"], capture_output=True)
+    return np.frombuffer(r.stdout, np.float32)
+
+
+def av_offset_ms(src: str, src_t: float, fin: str, fin_t: float, dur: float = 4.0, search_ms: float = 400, sr: int = 8000) -> float | None:
+    """Lag (ms) of the final's audio against the source audio at the same picture position (positive = final audio late)."""
+    import numpy as np
+
+    m = search_ms / 1000
+    b0 = max(0.0, fin_t - m)                 # the search window cannot start before the file
+    a = _pcm(src, src_t, dur, sr)
+    b = _pcm(fin, b0, dur + (fin_t - b0) + m, sr)
+    if len(a) < sr // 4 or len(b) < len(a) or float(np.std(a)) < 1e-4:
+        return None
+    a = (a - a.mean()) / (a.std() + 1e-9)
+    n = len(b) - len(a) + 1
+    c = np.array([float(np.dot(a, b[k:k + len(a)])) for k in range(0, n)])
+    return round((int(np.argmax(c)) / sr - (fin_t - b0)) * 1000, 1)
+
+
+def av_check(qa: dict, final: str, fps: float) -> dict:
+    """Per segment: cross-correlate the source audio with the final audio at the frame-exact picture position."""
+    tol = qa.get("_sync_tol_ms", 10.0)
+    rows, t = [], 0.0
+    for c in qa["clips"]:
+        for f0, f1 in c["segments_frames"]:
+            d = (f1 - f0) / fps
+            w = min(4.0, d - 0.1)                      # stay inside the segment (and past its 30 ms fades)
+            off = max(0.05, (d - w) / 2)
+            lag = av_offset_ms(c["video"], f0 / fps + off, final, t + off, dur=w) if w >= 0.4 else None
+            rows.append({"clip": c["clip"], "t_final": round(t, 3), "offset_ms": lag})
+            t += d
+    p = C.probe(final)
+    streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,duration", "-of", "json", final],
+                             capture_output=True, text=True).stdout
+    durs = {x["codec_type"]: float(x.get("duration", 0) or 0) for x in json.loads(streams).get("streams", [])}
+    gap = abs(durs.get("video", 0) - durs.get("audio", 0))
+    ok = all(r["offset_ms"] is None or abs(r["offset_ms"]) <= tol for r in rows) and gap <= 1.0 / fps + 0.03
+    return {"segments": rows, "stream_gap_s": round(gap, 3), "duration": p["duration"], "pass": ok,
+            "note": "lip sync inside a clip (model output) still needs SyncNet or a look; this checks the joins only"}
+
+
 # ---------------------------------------------------------------- the edit
 def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Path, dry_run: bool = False, require_wer: bool = True,
          title: str = "", subtitle: str = "", wer_dir: str | Path | None = None) -> dict:
@@ -195,7 +241,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     plan = plan or {}
     ref_lines = {c["clip"]: " ".join(c["lines"]) for c in plan.get("clips", [])}
     punch = {a["clip"]: a.get("punch_in", False) for a in plan.get("angles", {}).get("clips", [])}
-    qa: dict = {"profile": prof["name"], "clips": []}
+    qa: dict = {"profile": prof["name"], "clips": [], "_sync_tol_ms": ed["sync"]["max_offset_ms"]}
 
     # E1
     e1 = word_check(clips, prof, require=require_wer)
@@ -243,18 +289,31 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     fade = ed["cuts"]["audio_fade_ms"] / 1000.0
     z = ed["pacing"]["punch_in_scale"]
     inputs, fc, labels, k = [], [], [], 0
+    sr = 48000
     for ci, c in enumerate(qa["clips"]):
         inputs += ["-i", c["video"]]
+        n_frames = int((c.get("duration") or 0) * (c.get("fps") or fps) + 1e-6) if c.get("duration") else None
+        c["segments_frames"] = []
         for a, b in c["segments"]:
-            vf = f"[{ci}:v]trim=start={a}:end={b},setpts=PTS-STARTPTS"
+            # Sample-exact join: snap both ends to the frame grid, trim video by frame and audio by sample, so every segment's
+            # audio lasts exactly frames/fps. Unequal lengths add an audio lead at every join (seen: +48 ms per join).
+            f0, f1 = round(a * fps), round(b * fps)
+            if n_frames:
+                f1 = min(f1, n_frames)
+            if f1 <= f0:
+                continue
+            c["segments_frames"].append([f0, f1])
+            s0, s1 = round(f0 * sr / fps), round(f1 * sr / fps)
+            vf = f"[{ci}:v]trim=start_frame={f0}:end_frame={f1},setpts=PTS-STARTPTS"
             if c.get("punch_in"):
                 vf += f",crop=iw/{z}:ih/{z}"
             vf += f",scale={W}:{H}:flags=lanczos,setsar=1,fps={fps}"
             if c.get("cube"):
                 vf += "," + C.LUT_CHAIN.format(cube=c["cube"])
             vf += f",format=yuv420p[v{k}]"
-            d = b - a
-            af = f"[{ci}:a]atrim=start={a}:end={b},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo"
+            d = (f1 - f0) / fps
+            af = (f"[{ci}:a]aresample={sr},aformat=sample_rates={sr}:channel_layouts=stereo,apad,"
+                  f"atrim=start_sample={s0}:end_sample={s1},asetpts=PTS-STARTPTS")
             if fade > 0 and d > 4 * fade:
                 af += f",afade=t=in:st=0:d={fade},afade=t=out:st={d - fade:.4f}:d={fade}"
             af += f"[a{k}]"
@@ -280,7 +339,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
            "-c:v", "libx264", "-preset", enc["preset"], "-crf", str(enc["crf"]), "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", str(assembled)]
     qa["ffmpeg_assemble"] = cmd
     edl = {"segments": [{"clip": c["clip"], "segments": c["segments"], "cuts": c["cuts"], "punch_in": c.get("punch_in"), "lut": bool(c.get("cube"))}
-                        for c in qa["clips"]]}
+                        for c in qa["clips"]]}  # frame-exact ranges are added to edit_qa.json (segments_frames)
     (out / "edl.json").write_text(json.dumps(edl, indent=1))
     if dry_run:
         qa["dry_run"] = True
@@ -317,12 +376,13 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     # E3 measured after: per clip in the final timeline + joins
     fin = C.probe(str(final))
     qa["final"] = {"path": str(final), **fin}
+    t, pos = 0.0, []
+    for c in qa["clips"]:
+        d = sum(f1 - f0 for f0, f1 in c["segments_frames"]) / fps
+        pos.append((t, t + d))
+        t += d
+    qa["av"] = av_check(qa, str(final), fps)
     if stats:
-        t, pos = 0.0, []
-        for c in qa["clips"]:
-            d = sum(b - a for a, b in c["segments"])
-            pos.append((t, t + d))
-            t += d
         after = [C.lab_stats(list(C.frames_rgb(str(final), step=col["sample_step"], start=a, end=b))) for a, b in pos]
         anchor = qa["anchor"]["stats"]
         for c, s in zip(qa["clips"], after):
@@ -356,6 +416,8 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         {"id": "G11", "gate": f"loudness {ed['audio']['lufs']} +/- {ed['audio']['lufs_tol']} LU, true peak <= {ed['audio']['true_peak']} dBTP (AAC file)",
          "pass": abs(L["I"] - ed["audio"]["lufs"]) <= ed["audio"]["lufs_tol"] and L["TP"] <= ed["audio"]["true_peak"] + 0.05},
         {"id": "G12", "gate": f"contact sheet {cols}x{rows} written", "pass": sheet.exists() and sheet.stat().st_size > 0},
+        {"id": "G13", "gate": f"sample-exact joins: every segment's audio within {ed['sync']['max_offset_ms']} ms of its source, "
+                              f"streams within one frame", "pass": qa["av"]["pass"]},
     ]
     qa["errors"] = errors
     qa["gates"] = gates
@@ -376,4 +438,5 @@ def summary(qa: dict) -> dict:
             "duration_s": round(qa["final"]["duration"], 2), "loudness": qa["loudness"]["final"],
             "clip_dE76_after": [c.get("colour_after", {}).get("dE76_vs_anchor") for c in qa["clips"]],
             "join_dE76": [j["dE76"] for j in qa.get("colour_joins", [])], "cuts": sum(len(c["cuts"]) for c in qa["clips"]),
+            "av_offsets_ms": [r["offset_ms"] for r in qa["av"]["segments"]], "stream_gap_s": qa["av"]["stream_gap_s"],
             "contact_sheet": qa["contact_sheet"]["path"], "final": qa["final"]["path"], "warnings": qa.get("warnings", [])}

@@ -94,6 +94,7 @@ def cmd_plan(a):
 
     prof = profiles.load(a.profile)
     sc = PL.load_script(a.script, clip_seconds=a.clip_seconds, scene_path=a.scene)
+    sc.facts += PL.load_facts(a.facts)
     plan = PL.plan(sc, prof, anchor_still=a.anchor_still)
     path = PL.write(plan, a.out)
     if a.llm:
@@ -165,6 +166,7 @@ def main(argv=None):
     s.add_argument("script", help="script YAML or Markdown segment tables"); s.add_argument("--profile", default="talking_head")
     s.add_argument("--clip-seconds", type=float, help="override every clip length"); s.add_argument("--scene", help="YAML with speaker and scene text")
     s.add_argument("--anchor-still", help="image whose grade is the colour anchor"); s.add_argument("--out", default="plan")
+    s.add_argument("--facts", help="fact sheet YAML (production data, article, logs); a contradicted claim fails G2F")
     s.add_argument("--llm", action="store_true", help="write the whole-script review request; send it if OLV_LLM_URL is set")
     s.add_argument("--no-gate", action="store_true", help="exit 0 even when a plan gate fails"); s.set_defaults(fn=cmd_plan)
     s = sub.add_parser("edit", help="studio editor (flow steps 9, 11, 12): cut, colour match, loudness, contact sheet, QA")

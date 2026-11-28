@@ -18,6 +18,7 @@ olv profiles                                    # list scenario profiles
 olv plan configs/scripts/example_talking_head.yaml --profile talking_head --out plan/
 olv plan SCRIPT.md --scene scene.yaml --clip-seconds 10 --profile talking_head --out plan/   # Markdown script + speaker/scene text
 olv plan script.yaml --anchor-still look.png --llm --out plan/                              # colour anchor from a still; write the review request
+olv plan script.yaml --facts facts.yaml --out plan/                                         # fail lines whose claims the facts contradict
 ```
 
 Exit code 1 when a gate fails (`--no-gate` to inspect anyway). `prompts/clipN.lines.txt` is the reference text for `olv wer`.
@@ -31,13 +32,14 @@ Markdown: `## Segment N (t0-t1 s): title` followed by a table `| # | a-b | spoke
 | Stage | What it does | Gate (plan fails when) | Rule ids |
 |---|---|---|---|
 | P1 text pass | Auto-fixes fake actions: stutters ("you'd, you'd"), coughs and other bracketed actions, fillers, self-corrections ("... well, nearly"), fake stops (ellipsis, dash). Flags repeated sentences (a 5-word run said twice in the film), repeated ideas across clips, weak joins between clips, digits, long lines. | G1 a banned action survives; G2 a repeated sentence | R-SP3 |
+| P1b fact check | `--facts facts.yaml` (or `facts:` in the script): each fact has `keywords` (all must appear in the line), `allowed` (one must appear) and `forbid` (regex). Use the production data, article and logs. The fact sheet also goes into the LLM review request. | G2F a claim contradicts the fact sheet | R-SP4 |
 | P2 speech density | Words per clip must fit `wps` x (deadline - first word). Deadline = S - 1.7 s; for clips of 15 s or less also 14.5 s. Line times are estimated at `wps_nominal` and become the prompt time codes. Hook check: the first line should end by `hook.first_line_by_s` (warning). | G3 words outside the band (too few invites invented words; too many rushes); G4 estimated last word late | R-SP1, R-SP2, R-HK1 |
 | P3 angle plan | Target changes = profile band scaled to the film length (talking head: 2-3 per 3 min). Changes only at clip joins (one locked camera per clip), at the joins with the largest topic shift, never before `min_open_clips`, at least `min_clips_between` apart, last join back to set-up A (bookend). New set-up: no last-frame chaining, use that set-up's reference still. `punch_in` mode leaves the camera and lets the editor crop. | G5 changes outside the band | R-AN1, R-AN2, R-AN3 |
 | P4 gesture budget | Each gesture type has a film budget (1-2), a meaning cue (regex), and a minimum gap (40 s). At most `density` x lines in total, `max_per_clip` per clip, finger shapes capped at `finger_max`. Every other line rests. | G6 a budget or the finger cap broken | R-GE1, R-GE2 |
 | P5 colour anchor | Anchor = clip 1 (default) or a still (`--anchor-still`, measured Lab mean/std). Records the gates the editor enforces. | (checked in the editor, G10) | R-CO1, R-CO2 |
 | P6 prompts | One prompt per clip with `prompt.build`: references, framing picture sentence from the angle plan, speaker, scene, framing, locked camera, time-coded lines with the gesture or rest wording, end silence. Then `prompt.lint`. | G7 any lint problem | flow step 2 |
 
-Talking head, 6 x 30 s (our 3-min demo script): set-ups A A B B C A (changes at 60, 120 and 150 s), 11 gestures in 36 lines (was 36 cues, 8 finger shapes), 6 fake actions auto-fixed, and G3 failed on clip 2 (75 words after the fixes, band 79-86): the writer adds words before any render.
+Talking head, 6 x 30 s (our 3-min demo script): set-ups A A B B C A (changes at 60, 120 and 150 s), 11 gestures in 36 lines (was 36 cues, 8 finger shapes), 6 fake actions auto-fixed, G3 failed on clip 2 (75 words after the fixes, band 79-86), and a fact sheet from the production data failed 6 lines (G2F: render time, gestures, camera plan, voice conversion, speech limit, takes). The writer fixed both before any render.
 
 ## Profiles
 `configs/profiles/_base.yaml` holds every key with the talking-head numbers. A profile lists only what differs.

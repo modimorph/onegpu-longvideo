@@ -51,10 +51,11 @@ def test_word_check_flags_gibberish(tmp_path):
     assert ED.word_check([{"clip": 2, "video": "x", "wer": None}], TH)["errors"][0]["type"] == "no_wer_file"
 
 
-def _clip(path, colour, freq):
+def _clip(path, colour, seed):
+    """3 s clip; pink noise (not a sine) so the A/V cross-correlation has one clear peak."""
     path.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s=320x180:r=24:d=3",
-                    "-f", "lavfi", "-i", f"sine=frequency={freq}:sample_rate=48000:duration=3", "-shortest",
+                    "-f", "lavfi", "-i", f"anoisesrc=d=3:c=pink:a=0.3:r=48000:seed={seed}", "-shortest",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path)], check=True)
 
 
@@ -63,10 +64,10 @@ def test_edit_end_to_end(tmp_path):
     clips = tmp_path / "clips"
     for i, (c, f) in enumerate([("0x806050", 440), ("0x5a4030", 550), ("0x907060", 660)], 1):
         _clip(clips / f"clip{i}" / "video.mp4", c, f)
-        heard = _w("one two three four five six", t=0.3, d=0.3, gap=0.05)
+        heard = _w(" ".join(f"w{i}x{k}" for k in range(6)), t=0.3, d=0.3, gap=0.05)
         (clips / f"clip{i}" / "wer.json").write_text(json.dumps({
             "wer": 0, "win_wer": [0], "windows": [{"window": [0, 3], "wer": 0, "invented": 0}], "last_word_s": heard[-1]["t1"], "words": heard}))
-    plan = {"film": {"profile": "talking_head"}, "clips": [{"clip": i, "lines": ["one two three four five six"]} for i in (1, 2, 3)],
+    plan = {"film": {"profile": "talking_head"}, "clips": [{"clip": i, "lines": [" ".join(f"w{i}x{k}" for k in range(6))]} for i in (1, 2, 3)],
             "angles": {"clips": [{"clip": 1}, {"clip": 2, "punch_in": True}, {"clip": 3}]}}
     (tmp_path / "plan.json").write_text(json.dumps(plan))
     out = tmp_path / "edit"
@@ -75,7 +76,8 @@ def test_edit_end_to_end(tmp_path):
     qa = json.loads((out / "edit_qa.json").read_text())
     assert (out / "final.mp4").exists() and (out / "contact_sheet.jpg").exists()
     g = {x["id"]: x["pass"] for x in qa["gates"]}
-    assert g["G8"] and g["G9"] and g["G12"], qa["gates"]
+    assert g["G8"] and g["G9"] and g["G12"] and g["G13"], qa["gates"]
+    assert all(r["offset_ms"] is not None and abs(r["offset_ms"]) <= 10 for r in qa["av"]["segments"]), qa["av"]
     L = qa["loudness"]["final"]
     assert abs(L["I"] + 14) <= 1.0 and L["TP"] <= -1.95, L
     before = [c["colour_before"]["dE76_vs_anchor"] for c in qa["clips"]]

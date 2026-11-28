@@ -113,3 +113,14 @@ def test_llm_request_has_whole_script():
     s = PL.load_script(EXAMPLE)
     req = PL.llm_review_request(s, PL.text_pass(s, TH))
     assert "clip 1" in req and "clip 3" in req and "fake spoken action" in req
+
+
+def test_fact_sheet_catches_contradicted_claims(tmp_path):
+    s = _script(1, 10, [["So we render two takes and pick the best one.", "Thirty seconds takes about three minutes."]])
+    s.facts = [{"id": "takes", "keywords": ["takes"], "forbid": [r"\btwo takes\b"], "note": "three clips were best of one"},
+               {"id": "render", "keywords": ["thirty seconds", "takes about"], "allowed": ["ten minutes"], "note": "native 720p: 620-673 s"}]
+    hits = PL.fact_check(s)
+    assert {h["fact"] for h in hits} == {"takes", "render"}
+    p = PL.plan(s, TH)
+    assert not next(g for g in p["gates"] if g["id"] == "G2F")["pass"]
+    assert "Fact sheet" in PL.llm_review_request(s, p["text_pass"])

@@ -49,6 +49,7 @@ class Script:
     clips: list[Clip]
     speaker: dict = field(default_factory=dict)   # tag, role, description, language, voice_ref
     scene: dict = field(default_factory=dict)     # refs, description, sound
+    facts: list = field(default_factory=list)     # fact sheet: [{id, keywords, allowed, forbid, note}]
 
 
 # ---------------------------------------------------------------- input
@@ -60,6 +61,35 @@ def _segments_md(text: str, clip_seconds: float | None) -> list[Clip]:
         secs = clip_seconds or (float(m.group(3)) - float(m.group(2)))
         clips.append(Clip(int(m.group(1)), m.group(4).strip(), secs, [Line(r[0], r[0], r[1]) for r in rows]))
     return clips
+
+
+def load_facts(path: str | Path | None) -> list:
+    """Fact sheet YAML: a list of {id, keywords: [all must appear], allowed: [one must appear], forbid: [regex], note}."""
+    import yaml
+
+    if not path:
+        return []
+    d = yaml.safe_load(Path(path).read_text()) or []
+    return d.get("facts", []) if isinstance(d, dict) else d
+
+
+def fact_check(script: "Script") -> list[dict]:
+    """Lines whose claim contradicts the fact sheet (production data, article, logs). Each hit is a fail: rewrite before rendering."""
+    out = []
+    for c in script.clips:
+        for n, ln in enumerate(c.lines, 1):
+            t = ln.text.lower()
+            for f in script.facts:
+                kws = [k.lower() for k in f.get("keywords", [])]
+                if kws and not all(k in t for k in kws):
+                    continue
+                bad = [rx for rx in f.get("forbid", []) if re.search(rx, t, re.I)]
+                allowed = [a.lower() for a in f.get("allowed", [])]
+                miss = bool(allowed) and kws and not any(a in t for a in allowed)
+                if bad or miss:
+                    out.append({"where": f"line {n} of clip {c.idx}", "type": "claim_vs_facts", "severity": "fail", "fact": f.get("id", ""),
+                                "note": f.get("note", "")})
+    return out
 
 
 def load_script(path: str | Path, clip_seconds: float | None = None, scene_path: str | Path | None = None) -> Script:
@@ -77,7 +107,7 @@ def load_script(path: str | Path, clip_seconds: float | None = None, scene_path:
         for i, c in enumerate(d["clips"], 1):
             lines = [Line(x, x) if isinstance(x, str) else Line(x["text"], x["text"], x.get("cue", "")) for x in c["lines"]]
             clips.append(Clip(i, c.get("title", f"clip {i}"), float(c.get("seconds", default_s)), lines, c.get("side", "")))
-        return Script(d.get("title", p.stem), clips, d.get("speaker", {}), d.get("scene", {}))
+        return Script(d.get("title", p.stem), clips, d.get("speaker", {}), d.get("scene", {}), d.get("facts", []))
     clips = _segments_md(txt, clip_seconds)
     if not clips:
         raise ValueError(f"no clips found in {p}: use the YAML format or '## Segment N (t0-t1 s): title' tables")
@@ -174,6 +204,7 @@ def text_pass(script: Script, prof: dict) -> dict:
                 errors.append({"where": where, "type": f"banned_{kind}", "severity": "fail"})
     if "repeated_sentence" in banned:
         errors += [{**h, "severity": "fail"} for h in repeated_runs(where_text, tp["repeat_ngram"])]
+    errors += fact_check(script)
     # repeated ideas across clips (content-word overlap): a warning for the writer, not a fail
     L = [(c.idx, n, content_words(ln.text)) for c in script.clips for n, ln in enumerate(c.lines, 1)]
     for i in range(len(L)):
@@ -203,11 +234,13 @@ def llm_review_request(script: Script, tp_result: dict) -> str:
     """The whole-script review request for a writer model (logic, grammar, flow). Its answer is advice; it is never auto-applied."""
     body = "\n".join(f"clip {c.idx} ({c.title}), line {n}: {ln.text}" for c in script.clips for n, ln in enumerate(c.lines, 1))
     flags = json.dumps(tp_result["errors"] + tp_result["warnings"], indent=0)
+    facts = "\n".join(f"- {f.get('id', '')}: {f.get('note', '')}" for f in script.facts) or "- none given"
     return ("You are a script editor for a spoken video. Read the WHOLE script below as one text.\n"
             "Check: logic from start to end, grammar, flow between clips, repeated ideas or sentences, claims that contradict each other, "
             "and any fake spoken action (stutter, cough, filler, self-correction, fake stop). Keep every line's word count within 2 words.\n"
             "Answer only as lines: 'clip M line N: <problem type> -> <rewrite>'. Write 'OK' if nothing needs a change.\n\n"
-            f"Automatic flags:\n{flags}\n\nScript:\n{body}\n")
+            "Every claim must agree with the fact sheet; a claim the facts contradict is an error, not style.\n\n"
+            f"Fact sheet:\n{facts}\n\nAutomatic flags:\n{flags}\n\nScript:\n{body}\n")
 
 
 def llm_review(request: str, url: str, model: str, key: str = "", timeout: float = 120) -> str:
@@ -442,6 +475,7 @@ def plan(script: Script, prof: dict, anchor_still: str | None = None) -> dict:
     gates = [
         {"id": "G1", "gate": "no banned fake action left", "pass": not [e for e in tp["errors"] if e["type"].startswith("banned_")]},
         {"id": "G2", "gate": "no repeated sentence", "pass": not [e for e in tp["errors"] if e["type"] == "repeated_sentence"]},
+        {"id": "G2F", "gate": "no claim contradicts the fact sheet", "pass": not [e for e in tp["errors"] if e["type"] == "claim_vs_facts"]},
         {"id": "G3", "gate": "words per clip inside the band", "pass": not [e for e in dens["errors"] if "words" in e["type"]]},
         {"id": "G4", "gate": "estimated last word by the deadline", "pass": not [e for e in dens["errors"] if e["type"] == "last_word_late"]},
         {"id": "G5", "gate": "angle changes inside the band, only at clip joins", "pass": not angles["errors"]},
