@@ -331,7 +331,8 @@ def av_check(qa: dict, final: str, fps: float) -> dict:
 
 # ---------------------------------------------------------------- the edit
 def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Path, dry_run: bool = False, require_wer: bool = True,
-         title: str = "", subtitle: str = "", wer_dir: str | Path | None = None, captions: bool | None = None) -> dict:
+         title: str = "", subtitle: str = "", wer_dir: str | Path | None = None, captions: bool | None = None,
+         normalize_framing: bool = False) -> dict:
     ed = prof["editor"]
     out = Path(out_dir)
     clips = find_clips(clips_dir, wer_dir)
@@ -399,6 +400,26 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                 fs = c["framing"]["start"]
                 if fs and abs(fs["scale"] - 1) > ed["review"]["max_framing_drift"] and c is not ref_c:
                     qa.setdefault("warnings", []).append(f"clip {c['clip']}: framing {fs['scale']}x vs clip {ref_c['clip']} (camera drift)")
+            if normalize_framing:
+                # crop every clip of a set-up to the TIGHTEST view of that set-up, aligned by the measured transform
+                # (only zoom in: a crop cannot show what the camera did not see)
+                groups: dict = {}
+                for c in qa["clips"]:
+                    fr = (c.get("framing") or {}).get("start")
+                    if fr:
+                        groups.setdefault(c["framing"]["vs_clip"], []).append((c, fr))
+                for members in groups.values():
+                    tgt = max(members, key=lambda m: m[1]["scale"])[1]
+                    if tgt["scale"] <= 1 + ed["review"]["max_framing_drift"] / 2:
+                        continue
+                    for c, fr in members:
+                        k = fr["scale"] / tgt["scale"]              # < 1: this clip shows more than the target
+                        if abs(1 - k) < 0.01 and abs(fr["dx"] - tgt["dx"]) < 2:
+                            continue
+                        # target view in this clip's pixels (transforms measured at 960 px width): x0 = s_c * (-dx_T / s_T) + dx_c
+                        x0 = fr["scale"] * (-tgt["dx"] / tgt["scale"]) + fr["dx"]
+                        y0 = fr["scale"] * (-tgt["dy"] / tgt["scale"]) + fr["dy"]
+                        c["framing_crop"] = {"k": round(k, 4), "x0_960": round(x0, 1), "y0_960": round(y0, 1), "to_scale": tgt["scale"]}
         except ImportError:
             qa.setdefault("warnings", []).append("framing drift not measured (needs opencv)")
     W, H = qa["clips"][0]["width"] or 1280, qa["clips"][0]["height"] or 720
@@ -481,6 +502,13 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
             s0 = round(f0 / cfps * sr)
             c["segments_frames"].append([f0, f1, n_out])
             vf = f"[{ci}:v]trim=start_frame={f0}:end_frame={f1},setpts=PTS-STARTPTS"
+            if c.get("framing_crop") and c.get("width") and c.get("height"):
+                fc_, sw, sh = c["framing_crop"], c["width"], c["height"]
+                cw, ch = int(sw * fc_["k"]) // 2 * 2, int(sh * fc_["k"]) // 2 * 2
+                cx = int(min(max(0, fc_["x0_960"] * sw / 960), sw - cw))
+                cy = int(min(max(0, fc_["y0_960"] * sw / 960), sh - ch))
+                fc_.update(px=[cw, ch, cx, cy])
+                vf += f",crop={cw}:{ch}:{cx}:{cy}"
             if c.get("punch_in"):
                 zc = c.get("punch_scale") or z
                 vf += f",crop=iw/{zc}:ih/{zc}"

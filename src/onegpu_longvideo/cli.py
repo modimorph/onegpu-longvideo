@@ -132,7 +132,7 @@ def cmd_edit(a):
     prof = profiles.load(a.profile or (plan or {}).get("film", {}).get("profile") or "talking_head")
     try:
         qa = ED.edit(a.clips_dir, plan, prof, a.out, dry_run=a.dry_run, require_wer=not a.no_wer, title=a.title or "", subtitle=a.subtitle or "",
-                     wer_dir=a.wer_dir, captions=a.captions)
+                     wer_dir=a.wer_dir, captions=a.captions, normalize_framing=a.normalize_framing)
     except (FileNotFoundError, ValueError) as e:
         sys.exit(f"olv edit: {e}")
     print(json.dumps(ED.summary(qa)))
@@ -198,6 +198,7 @@ def main(argv=None):
     s.add_argument("--wer-dir", help="folder with clipN.wer.json files (keeps the clip folders clean)")
     s.add_argument("--captions", dest="captions", action="store_true", default=None, help="burn captions in (default: the profile)")
     s.add_argument("--no-captions", dest="captions", action="store_false", help="do not burn captions in (captions.srt is still written)")
+    s.add_argument("--normalize-framing", action="store_true", help="crop each clip to the tightest camera view of its set-up (needs opencv)")
     s.add_argument("--no-wer", action="store_true", help="allow clips without wer.json (G8 then only covers checked clips)"); s.set_defaults(fn=cmd_edit)
     s = sub.add_parser("profiles", help="list scenario profiles"); s.set_defaults(fn=cmd_profiles)
     s = sub.add_parser("bgcheck", help="background consistency of a clip vs a reference clip or image (needs opencv + mediapipe)")

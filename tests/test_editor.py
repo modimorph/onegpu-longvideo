@@ -280,3 +280,22 @@ def test_framing_scale_is_measured():
     zoomed = cv2.resize(crop, (w, h), interpolation=cv2.INTER_LINEAR)
     r = C.framing_vs(ref, zoomed)
     assert r and abs(r["scale"] - z) < 0.02
+
+
+@pytest.mark.skipif(not HAS_FF, reason="needs ffmpeg")
+def test_normalize_framing_aligns_a_zoomed_clip(tmp_path):
+    pytest.importorskip("cv2")
+    from onegpu_longvideo import colour as C
+    tex = tmp_path / "tex.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "cellauto=s=640x360:rule=110:seed=3,scale=960:540:flags=neighbor",
+                    "-frames:v", "1", str(tex)], check=True)
+    for n, vf in ((1, "scale=960:540"), (2, "crop=iw/1.15:ih/1.15,scale=960:540")):
+        out = tmp_path / "c" / f"clip{n}" / "video.mp4"
+        out.parent.mkdir(parents=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-loop", "1", "-i", str(tex), "-f", "lavfi", "-i", f"anoisesrc=d=3:c=pink:a=0.3:seed={n}",
+                        "-t", "3", "-vf", vf + ",format=yuv420p", "-r", "24", "-c:v", "libx264", "-crf", "12", "-c:a", "aac", str(out)], check=True)
+    qa = ED.edit(tmp_path / "c", None, TH, tmp_path / "o", require_wer=False, normalize_framing=True)
+    assert abs(qa["clips"][1]["framing"]["start"]["scale"] - 1.15) < 0.03 and qa["clips"][0].get("framing_crop")
+    fin = str(tmp_path / "o" / "final.mp4")
+    r = C.framing_vs(C.frame_gray(fin, 1.0), C.frame_gray(fin, 4.0))
+    assert r and abs(r["scale"] - 1.0) < 0.03
