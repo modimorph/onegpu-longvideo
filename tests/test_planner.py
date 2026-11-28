@@ -209,3 +209,11 @@ def test_angle_plan_scales_and_stays_in_band(n, sec, prof):
     assert time.time() - t < 2 and not a["errors"], (a["band"], a["changes"])
     seq = [r["setup"] for r in a["clips"]]
     assert all(not r["change_from_prev"] or seq[i] != seq[i - 1] for i, r in enumerate(a["clips"]))
+
+
+def test_varied_rest_variant_extends_talking_head():
+    v = profiles.load("talking_head_varied")
+    assert v["planner"]["speech"]["wps"] == TH["planner"]["speech"]["wps"] and len(v["planner"]["gestures"]["rest_variants"]) == 4
+    s = _script(1, 29.96, [[f"Neutral line number {i} here." for i in range(6)]])
+    rests = [r["wording"] for r in PL.gesture_plan(s, v)["lines_plan"] if r["type"] == "rest"]
+    assert all(a != b for a, b in zip(rests, rests[1:]))

@@ -123,7 +123,7 @@ def cmd_profiles(a):
     from . import profiles
 
     for n in profiles.names():
-        print(f"{n:16s} {profiles.load(n).get('description', '')}")
+        print(f"{n:20s} {profiles.load(n).get('description', '')}")
 
 
 def cmd_camera(a):

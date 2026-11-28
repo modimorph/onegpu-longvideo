@@ -2,7 +2,8 @@
 
 A profile holds only data: speech band, angle plan, gesture budget, colour gates, cut, loudness and review rules.
 Every profile is deep-merged over `_base.yaml`, so a profile file lists only what differs from the base.
-`_replace: [planner.gestures.types]` in a profile replaces that key instead of merging it (a cinematic short has no desk gestures).
+`extends: talking_head` merges a variant over another profile.
+`_replace: [planner.gestures.types]` replaces that key instead of merging it (a cinematic short has no desk gestures).
 Sources for the numbers: docs/PLANNER.md and docs/EDITOR.md (rule ids point to the research notes).
 """
 from __future__ import annotations
@@ -45,9 +46,14 @@ def load(name_or_path: str, profile_dir: str | Path | None = None) -> dict:
         p = (Path(profile_dir) if profile_dir else PROFILE_DIR) / f"{name_or_path}.yaml"
     if not p.exists():
         raise FileNotFoundError(f"profile not found: {p} (known: {', '.join(names(profile_dir))})")
-    base_p = p.parent / "_base.yaml"
-    base = yaml.safe_load(base_p.read_text()) if base_p.exists() else {}
     over = yaml.safe_load(p.read_text()) or {}
+    if over.get("extends"):          # a variant profile: merge over its parent (which is merged over the base)
+        base = load(str(p.parent / f"{over['extends']}.yaml"))
+        base.pop("name", None)
+        base.pop("_replace", None)
+    else:
+        base_p = p.parent / "_base.yaml"
+        base = yaml.safe_load(base_p.read_text()) if base_p.exists() else {}
     prof = _merge(base, over)
     for dotted in over.get("_replace", []):   # keys the profile replaces instead of merging (e.g. planner.gestures.types)
         src, dst = over, prof

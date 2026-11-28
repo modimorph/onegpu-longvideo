@@ -494,12 +494,22 @@ def gesture_plan(script: Script, prof: dict) -> dict:
         last_t[g] = tf
         per_clip[cid] += 1
     rows = []
+    variants = gp.get("rest_variants") or []
+    if script.speaker.get("rest"):
+        variants = []                     # the script's own rest wording wins
+    k_rest = 0
     for c in script.clips:
         for n, ln in enumerate(c.lines, 1):
             g = pick.get((c.idx, n))
             m = re.search(r"\b(two|three|four)\b", ln.text.lower())
-            rows.append({"clip": c.idx, "line": n, "type": g or "rest",
-                         "wording": types[g]["wording"].format(n=m.group(1) if m else "two") if g else gp["rest"]})
+            if g:
+                wording = types[g]["wording"].format(n=m.group(1) if m else "two")
+            elif variants:                # cycle neutral poses so no clip holds one frozen pose (hypothesis, see docs)
+                wording = variants[k_rest % len(variants)]
+                k_rest += 1
+            else:
+                wording = gp["rest"]
+            rows.append({"clip": c.idx, "line": n, "type": g or "rest", "wording": wording})
     errors = [{"where": "film", "type": f"gesture_over_budget:{g}", "severity": "fail"} for g in used if used[g] > types[g]["budget"]]
     if sum(used[x] for x in finger) > gp["finger_max"]:
         errors.append({"where": "film", "type": "too_many_finger_shapes", "severity": "fail"})
