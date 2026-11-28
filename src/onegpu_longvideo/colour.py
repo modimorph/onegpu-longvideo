@@ -121,3 +121,34 @@ def hard_cuts(path: str, start: float | None = None, end: float | None = None, r
     fps = probe(path)["fps"]
     thr = max(floor, ratio * med)
     return [round((i + 1) / fps, 3) for i, d in enumerate(diffs) if d > thr]
+
+
+def frame_gray(path: str, t: float, width: int = 960):
+    """One grey frame at time t (frame-accurate decode), or None."""
+    out = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{max(0.0, t):.3f}", "-i", path, "-frames:v", "1", "-vf",
+                          f"scale={width}:-2,format=gray", "-f", "rawvideo", "-"], capture_output=True).stdout
+    if not out:
+        return None
+    h = len(out) // width
+    return np.frombuffer(out[:h * width], np.uint8).reshape(h, width)
+
+
+def framing_vs(ref, img) -> dict | None:
+    """Similarity transform (scale, shift) from ref to img with ORB features + RANSAC (needs opencv). scale > 1 = closer."""
+    import cv2
+
+    orb = cv2.ORB_create(4000)
+    ka, da = orb.detectAndCompute(ref, None)
+    kb, db = orb.detectAndCompute(img, None)
+    if da is None or db is None:
+        return None
+    m = sorted(cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True).match(da, db), key=lambda x: x.distance)[:800]
+    if len(m) < 20:
+        return None
+    pa = np.float32([ka[x.queryIdx].pt for x in m])
+    pb = np.float32([kb[x.trainIdx].pt for x in m])
+    M, inl = cv2.estimateAffinePartial2D(pa, pb, method=cv2.RANSAC, ransacReprojThreshold=3)
+    if M is None or inl.sum() < 20:
+        return None
+    return {"scale": round(float(np.hypot(M[0, 0], M[1, 0])), 3), "dx": round(float(M[0, 2]), 1), "dy": round(float(M[1, 2]), 1),
+            "inliers": int(inl.sum())}

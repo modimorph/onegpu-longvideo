@@ -80,6 +80,6 @@ editor:
   captions:   # captions.srt is always written from the kept word times; burned in when titles.captions is true (or --captions)
     style: {max_chars: 42, max_lines: 2, max_cps: 20, min_s: 0.8, max_s: 6.0}   # R-CA1 (Netflix English timed-text guide)
     burn: {font: Arial, size: 18, margin_v: 30}
-  review: {contact_sheet: [7, 6], thumb_width: 320}
+  review: {contact_sheet: [7, 6], thumb_width: 320, max_framing_drift: 0.05}   # warn when a clip's camera scale differs > 5 % from its set-up's first clip
   sync: {max_offset_ms: 10}   # per-segment audio vs picture after the join; audio lead is detectable from about 45 ms (R-ED6)
   encode: {crf: 18, preset: medium, audio_kbps: 192, width: null, height: null}

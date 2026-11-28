@@ -265,3 +265,18 @@ def test_inner_camera_cut_is_found(tmp_path):
     assert C.hard_cuts(str(out)) == [2.0]
     qa = ED.edit(tmp_path, None, TH, tmp_path / "o", require_wer=False)
     assert qa["clips"][0]["inner_cuts"][0]["t"] == pytest.approx(2.0, abs=0.05)
+
+
+def test_framing_scale_is_measured():
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+
+    from onegpu_longvideo import colour as C
+    rng = np.random.default_rng(1)
+    ref = cv2.GaussianBlur((rng.random((540, 960)) * 255).astype(np.uint8), (3, 3), 0)
+    h, w = ref.shape
+    z = 1.15
+    crop = ref[int(h / 2 - h / (2 * z)):int(h / 2 + h / (2 * z)), int(w / 2 - w / (2 * z)):int(w / 2 + w / (2 * z))]
+    zoomed = cv2.resize(crop, (w, h), interpolation=cv2.INTER_LINEAR)
+    r = C.framing_vs(ref, zoomed)
+    assert r and abs(r["scale"] - z) < 0.02

@@ -382,6 +382,25 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
             for x in c["inner_cuts"]:
                 qa.setdefault("warnings", []).append(
                     f"clip {c['clip']}: the model cut the camera inside the clip at {x['t']} s" + (" INSIDE a word" if x["in_word"] else " (between words)"))
+    if not dry_run:
+        # framing drift: camera scale and shift of every clip vs the first clip of its set-up (chained clips re-framed
+        # 1.15x closer at a join on the 3-min run). Needs opencv; skipped with a warning without it.
+        try:
+            import cv2  # noqa: F401
+            first_of = {}
+            setup_of = {a["clip"]: a.get("setup", "A") for a in plan.get("angles", {}).get("clips", [])}
+            for c in qa["clips"]:
+                su = setup_of.get(c["clip"], "A") if plan.get("angles", {}).get("mode", "generate") == "generate" else "A"
+                ref_c = first_of.setdefault(su, c)
+                ref = C.frame_gray(ref_c["video"], ref_c["segments"][0][0] + 0.5)
+                a0, b0 = c["segments"][0][0], c["segments"][-1][1]
+                c["framing"] = {"vs_clip": ref_c["clip"], "start": C.framing_vs(ref, C.frame_gray(c["video"], a0 + 0.5)),
+                                "end": C.framing_vs(ref, C.frame_gray(c["video"], max(a0, b0 - 0.5)))}
+                fs = c["framing"]["start"]
+                if fs and abs(fs["scale"] - 1) > ed["review"]["max_framing_drift"] and c is not ref_c:
+                    qa.setdefault("warnings", []).append(f"clip {c['clip']}: framing {fs['scale']}x vs clip {ref_c['clip']} (camera drift)")
+        except ImportError:
+            qa.setdefault("warnings", []).append("framing drift not measured (needs opencv)")
     W, H = qa["clips"][0]["width"] or 1280, qa["clips"][0]["height"] or 720
     fps = qa["clips"][0]["fps"] or 24
     W, H = (ed["encode"].get("width") or W), (ed["encode"].get("height") or H)
@@ -716,4 +735,5 @@ def summary(qa: dict) -> dict:
             "join_dE76": [j["dE76"] for j in qa.get("colour_joins", [])], "cuts": sum(len(c["cuts"]) for c in qa["clips"]),
             "av_offsets_ms": [r["offset_ms"] for r in qa["av"]["segments"]], "stream_gap_s": qa["av"]["stream_gap_s"],
             "inner_cuts": {c["clip"]: [x["t"] for x in c.get("inner_cuts", [])] for c in qa["clips"] if c.get("inner_cuts")},
+            "framing_scale": {c["clip"]: (c.get("framing") or {}).get("start", {}) and c["framing"]["start"]["scale"] for c in qa["clips"]},
             "contact_sheet": qa["contact_sheet"]["path"], "final": qa["final"]["path"], "warnings": qa.get("warnings", [])}
