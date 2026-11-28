@@ -212,5 +212,25 @@ Readings:
 - Fewer tokens (768x432) helped but did not fix it: 3 of 4 takes at 768x432 still failed one window.
 - Every failing window in every take started at 14.5 s or later. 15 s is the trained length. The temporal RoPE component k = 8 has a period of about 15.7 s (`onegpu_longvideo.frames.rope_time_periods`), so gaps past ~15 s are out of the trained range. This fits the onset. It is a hypothesis, not a proof.
 - Stretching the temporal RoPE ("yarn" on components k >= 8) made speech much worse. Do not use it as a fix.
-- Voice post (Seed-VC) on both published takes: podcast kept the converted voice, tutor kept the original voice (27 Nov 2026). Podcast: speaker match 0.616 to 0.789, WER 0 in every 5 s window, SyncNet offsets -1/-1/-1 unchanged. Tutor: first pass (30 steps, cfg 0.7, two reference clips) failed the sync guard (offsets 0/-1/0 to -1/-1/0). One change at a time, CPU, n = 1 each: same settings again, 50 steps, cfg 0.5 all failed the same way; a neutral-only reference clip passed every guard (offsets 0/-1/0 unchanged, WER 0 in all windows, speaker match 0.613 to 0.732 against that clip, DNSMOS OVR 3.04 to 3.23, 269 s on CPU). It was then rejected by a listening test: it sounded worse than the original, so the tutor ships the original voice. The metrics said better, the ear said worse. The reference differs between rows, so scores are not comparable across them. The guard compares whole-frame SyncNet offsets at 25 fps; a one-frame flip may be measurement noise (untested).
+- Voice post (Seed-VC) on both published takes: podcast kept the converted voice, tutor kept the original voice (27 Nov 2026; superseded by the second round at the end of this section). Podcast: speaker match 0.616 to 0.789, WER 0 in every 5 s window, SyncNet offsets -1/-1/-1 unchanged. Tutor: first pass (30 steps, cfg 0.7, two reference clips) failed the sync guard (offsets 0/-1/0 to -1/-1/0). One change at a time, CPU, n = 1 each: same settings again, 50 steps, cfg 0.5 all failed the same way; a neutral-only reference clip passed every guard (offsets 0/-1/0 unchanged, WER 0 in all windows, speaker match 0.613 to 0.732 against that clip, DNSMOS OVR 3.04 to 3.23, 269 s on CPU). It was then rejected by a listening test: it sounded worse than the original, so the tutor ships the original voice. The metrics said better, the ear said worse. The reference differs between rows, so scores are not comparable across them. The guard compares whole-frame SyncNet offsets at 25 fps; a one-frame flip may be measurement noise (untested).
 - Published potter documentary (no speech): 1280x720, VSA 10 %, render 541.5 s, SPAN x2 upscale 20.0 s.
+- Voice post, tutor, second round (27 Nov 2026): diagnosis and five labelled candidates at -16 LUFS (tone EQ, enhancer, two Seed-VC targets, original). A listening A/B picked the Seed-VC conversion to a livelier stock male voice (50 steps, cfg 0.7). Pitch range 6.9 to 12.3 semitones, energy below 300 Hz 8 % to 18.6 %, 1-3 kHz 28.8 % to 20.5 %, DNSMOS OVR 3.10 to 3.46, WER 0 in all six windows, SyncNet offsets -1/-1/0. n = 1. The published tutor now carries this voice at the podcast's loudness. Method: [VOICE.md](VOICE.md).
+
+## Studio editor on the 3-min demo (28 Nov 2026)
+
+`olv edit` on six existing 30 s talking-head clips (1920x1080, 24 fps, rendered before the planner existed, so every clip was chained from the previous clip's raw last frame). Word times from an earlier faster-whisper run; WER is scored against the planner's cleaned script, which differs from what was rendered, so G8 fails by design here. MacBook (M2 Pro) CPU, n = 1.
+
+| Measure | Before the editor | After `olv edit` | Gate |
+|---|---|---|---|
+| Clip mean dE76 vs clip 1 (clips 1-6) | 0, 1.5, 4.07, 5.66, 7.51, 9.05 | 0.36, 0.58, 0.59, 0.49, 0.57, 0.49 | G10 <= 2.0: pass |
+| Join dE76 (1-2 ... 5-6) | not measured | 0.92, 0.17, 0.15, 0.20, 0.16 | G10 <= 1.0: pass |
+| Audio vs picture per segment (7 segments) | a hand edit of the same clips: +48 ms per join, 295 ms by clip 6 | 0.0 ms on all (max 0.1) | G13 <= 10 ms: pass |
+| Loudness / true peak (AAC file) | -30.8 LUFS / -6.6 dBTP | -14.3 LUFS / -2.3 dBTP (3 tries, limiter took 7.1 dB) | G11: pass |
+| Cuts | | 1 (a 12-word replay in clip 3 at 15.34-17.63 s, the same span an older detector found at 15.34-17.70 s) | G9: pass |
+| Wall time | | 296 s for 176.5 s of 1080p | |
+
+Readings:
+- One LUT per clip (mean match) left the join 1-2 at dE76 1.04: the clips drift inside themselves. The keyframed grade (start and end LUT, crossfaded) brought it to 0.92 and the others to 0.15-0.20.
+- The first keyframed version mixed the two LUTs with an expression `blend`; it took 635 s for 60 s of 1080p. `xfade` does the same mix: 300 frames in 5.5 s instead of 34.9 s.
+- loudnorm in linear mode reached only -16.9 LUFS on this speech (crest factor 24.9 dB) under a -2 dBTP ceiling. Gain plus a delay-compensated limiter reaches -14.3. Untested: whether 7 dB of limiting is audible (listening check).
+- An untagged clip next to graded (tagged) clips shifted by dE76 1.7 at the concat until every segment got the same explicit BT.709 path.

@@ -1,0 +1,23 @@
+# Example script for `olv plan --profile documentary`: 3 clips x 20 s. Band per clip at 2.4-2.9 words/s: 44-52 words.
+title: Example documentary interview
+clip_seconds: 20
+speaker: {tag: S1, role: the beekeeper, language: English, voice_ref: true,
+          description: "The beekeeper, a man in his seventies with a white beard, a worn canvas jacket and calm, slow speech."}
+scene: {refs: "<Picture 1> is the identity reference for the beekeeper (S1). <Picture 2> is the reference for the apiary.",
+        description: "A wooden shed at the edge of an orchard, rows of white hives in soft afternoon light behind him.", sound: "Low hum of bees, birds far away; no music."}
+clips:
+  - title: Beginning
+    lines:
+      - "I started with two hives the summer my wife passed away, almost by accident."
+      - "A neighbour said the bees would keep me busy, and he was right about that, as he was about most things."
+      - "Forty years later, there are sixty hives behind this old shed, and I still know each one."
+  - title: The work
+    lines:
+      - "People think it is about honey. Mostly it is about watching, and being patient with them."
+      - "You learn the sound of a calm colony, and the very different sound of a worried one."
+      - "After a while, you hear trouble long before you ever see it."
+  - title: Now
+    lines:
+      - "These days my grandson does the lifting, and I do the listening from my chair."
+      - "He asks me how I always know when the queen is gone."
+      - "I tell him the truth: the whole hive goes very quiet, like a house after a funeral."

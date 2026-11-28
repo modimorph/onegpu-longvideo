@@ -1,0 +1,16 @@
+# Example script for `olv plan --profile cinematic_short`: 4 clips x 10 s, sparse dialogue. Band per clip: 10-21 words.
+title: Example cinematic short
+clip_seconds: 10
+speaker: {tag: S1, role: the traveller, language: English, voice_ref: true,
+          description: "The traveller, a woman in her sixties in a long grey wool coat and a red scarf, moves slowly and speaks softly."}
+scene: {refs: "<Picture 1> is the identity reference for the traveller (S1). <Picture 2> is the reference for the station.",
+        description: "An empty rural train station at dawn, mist over the tracks, a single lamp still burning on the platform.", sound: "Wind, distant birds, the hum of the lamp; no music."}
+clips:
+  - title: Arrival
+    lines: ["The last train left an hour ago, and nobody told me.", "Of course they did not."]
+  - title: Waiting
+    lines: ["My father worked this line for thirty years, in every kind of weather."]
+  - title: Memory
+    lines: ["He said the mist always lifts at seven.", "I never believed him then."]
+  - title: Light
+    lines: ["The clock says seven now.", "And look at that: the mist is lifting."]

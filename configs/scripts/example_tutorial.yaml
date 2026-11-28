@@ -1,0 +1,21 @@
+# Example script for `olv plan --profile tutorial`: 3 clips x 15 s. Band per 15 s clip at 2.5-2.9 words/s: 33-37 words.
+title: Example tutorial
+clip_seconds: 15
+speaker: {tag: S1, role: the instructor, language: English, voice_ref: true,
+          description: "The instructor, a person in their forties in a plain green shirt, explains each step calmly and clearly."}
+scene: {refs: "<Picture 1> is the identity reference for the instructor (S1). <Picture 2> is the reference for the workshop.",
+        description: "A bright workshop bench with a laptop, a small soldering station and neatly sorted parts.", sound: "Quiet workshop room tone; no music."}
+# speaker.rest can override the profile rest wording, e.g. rest: "keeps both hands flat on the bench"
+clips:
+  - title: Goal
+    lines:
+      - "Today we wire a small temperature sensor to a small board, one careful step at a time."
+      - "You need the sensor, three short wires, a breadboard, and a free afternoon to try it calmly at home."
+  - title: Wiring
+    lines:
+      - "First, connect the red wire from the sensor to the power pin, the one marked with a plus sign."
+      - "Next, the black wire goes to ground, and the yellow wire goes to pin four."
+  - title: Check
+    lines:
+      - "Now open the serial monitor and look at the numbers that scroll on screen."
+      - "If they change when you touch the sensor, the wiring is right, and you are done for today. Nice work."

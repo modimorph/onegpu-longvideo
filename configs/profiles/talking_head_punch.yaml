@@ -1,0 +1,12 @@
+# Variant of talking_head: the second "angle" is an editor punch-in (crop zoom), the standard YouTube talking-head move.
+# Every clip renders the same frontal set-up (chained, identity stays put); no set-up reference stills are needed.
+# Use when generated set-ups B/C misbehave (1-min test: the B clip held the frontal view for 4.7 s, then cut by itself).
+extends: talking_head
+description: "Talking-head explainer, angle changes as editor punch-ins (no new camera set-ups)"
+planner:
+  angles:
+    mode: punch_in
+    sequence: [A, B, C, A]
+    punch_scales: {B: 1.15, C: 1.3}   # B = medium punch-in, C = tighter; no source for the numbers (R-TU2 gives none): untested
+editor:
+  pacing: {punch_in_scale: 1.15}

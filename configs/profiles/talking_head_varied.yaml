@@ -1,0 +1,12 @@
+# Variant of talking_head: neutral lines cycle through 4 relaxed poses instead of one "stays still" pose.
+# Hypothesis (untested): one repeated still pose on up to 6 lines per clip reads as frozen or resets at each line.
+# Decide with an A/B render of one clip (same seed) and the contact sheet.
+extends: talking_head
+description: "Talking-head explainer, varied neutral poses (A/B variant)"
+planner:
+  gestures:
+    rest_variants:
+      - "rests both hands on the desk, relaxed"
+      - "keeps the hands loosely folded on the desk"
+      - "rests one forearm on the desk, the other hand relaxed"
+      - "sits back slightly with the hands resting together"

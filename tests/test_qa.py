@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from onegpu_longvideo.qa import detectors as D
 from onegpu_longvideo.qa import wer as Wr
@@ -75,3 +76,102 @@ def test_av_offset():
 def test_merge_windows():
     w = D.merge_windows([{"t_start": 1, "t_end": 2}, {"t_start": 2.2, "t_end": 3}, {"t": 10}], pad_s=0.5, max_len_s=3)
     assert w[0] == (0.5, 3.5) and w[-1] == (9.5, 10.5) and all(b - a <= 3 for a, b in w)
+
+
+def test_normalize_keeps_unicode_words():
+    from onegpu_longvideo.qa import wer
+    assert wer.normalize("Größe, naïve café") == ["größe", "naïve", "café"]
+
+
+
+@pytest.mark.parametrize("a,b", [("fifteen seconds", "15 seconds"), ("eighty-seven words", "87 words"), ("ten-eighty", "1080"),
+                                 ("at full ten-eighty", "at full 1080p"), ("forty five", "45"), ("ten percent", "10%"),
+                                 ("two hundred and five", "205"), ("ten-eighty", "10-80"), ("ten-eighty", "10 80"),
+                                 ("full ten-eighty", "full 1080s"), ("one thousand", "one thousand"), ("twenty four gigabytes", "24 gigabytes")])
+def test_numbers_match_in_either_form(a, b):
+    from onegpu_longvideo.qa import wer
+    assert wer.normalize(a) == wer.normalize(b)
+
+
+def test_fifteen_vs_15_is_not_an_error():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("Push it past 15 and it slips.".split())]
+    assert wer.score("Push it past fifteen and it slips.", heard, 5.0)["wer"] == 0
+
+
+
+@pytest.mark.parametrize("uk,us", [("colour", "color"), ("the colours", "the colors"), ("colour graded", "color graded"),
+                                   ("grey", "gray"), ("organised", "organized"), ("analysing", "analyzing"), ("favourite", "favorite")])
+def test_british_and_american_spellings_match(uk, us):
+    from onegpu_longvideo.qa import wer
+    assert wer.normalize(uk) == wer.normalize(us)
+    assert wer.normalize("promise") == ["promise"] and wer.normalize("our hour") == ["our", "hour"]
+
+
+
+def test_room_review_message_puts_reference_first():
+    from onegpu_longvideo.qa import stage2
+    m = stage2.build_room_message(b"REF", [(1.5, b"F1"), (2.0, b"F2")], {"kinds": ["step"]})
+    c = m[0]["content"]
+    assert "same_room" in c[0]["text"] and "step" in c[0]["text"]
+    assert c[1]["type"] == "image_url" and c[2]["text"] == "t=1.50 s" and len(c) == 6
+
+
+def test_background_compare_flags_a_new_object():
+    cv2 = pytest.importorskip("cv2")
+    from onegpu_longvideo.qa import background as B
+    rng = np.random.default_rng(0)
+    ref = (rng.random((B.H, B.W, 3)) * 60 + 100).astype(np.uint8)
+    ref = cv2.GaussianBlur(ref, (5, 5), 0)
+    same = ref.copy()
+    lamp = ref.copy()
+    lamp[60:200, 10:110] = (230, 200, 150)          # a bright new object at the left
+    bg = np.ones((B.H, B.W), bool)
+    a, b = B.compare(same, ref, bg), B.compare(lamp, ref, bg)
+    assert a["ssim"] > 0.99 and a["cell_ssim"] > 0.99
+    # a flat object over texture moves SSIM little (0.96 overall, 0.72 in the worst cell); the edge layout and colour catch it
+    assert b["edges"] < 0.55 and b["dE76"] > 4.0 and b["cell_ssim"] < 0.8 and B.where(b["cell"]).endswith("left")
+
+
+
+def test_background_reads_a_still_reference(tmp_path):
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        pytest.skip("needs ffmpeg")
+    from onegpu_longvideo.qa import background as B
+    png = tmp_path / "ref.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=640x360:d=1", "-frames:v", "1", str(png)], check=True)
+    got = list(B.frames(str(png), fps=2))
+    assert len(got) == 1 and got[0][1].shape == (B.H, B.W, 3)
+
+
+
+def test_number_split_across_asr_words_matches():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("And at full 10 80, the memory runs out.".split())]
+    assert wer.score("And at full ten-eighty, the memory runs out.", heard, 5.0)["wer"] == 0
+
+
+
+def test_split_tens_and_half_match():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("Attention was 80 7 percent, about 3.5 times faster.".split())]
+    assert wer.score("Attention was eighty-seven percent, about three and a half times faster.", heard, 5.0)["wer"] == 0
+
+
+
+def test_joined_name_splits_into_script_words():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("The repo is onegpulongvideo on GitHub.".split())]
+    assert wer.score("The repo is one GPU long video on GitHub.", heard, 5.0)["wer"] == 0
+
+
+
+def test_asr_alias_for_a_brand_name_is_explicit_and_logged():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("It runs in confi UI on the card.".split())]
+    ref = "It runs in ComfyUI on the card."
+    assert wer.score(ref, heard, 5.0)["wer"] > 0                      # without the alias: an error
+    r = wer.score(ref, heard, 5.0, aliases={"confi ui": "ComfyUI", "confiui": "ComfyUI"})
+    assert r["wer"] == 0 and r["aliases_used"] == [{"heard": "confi ui", "as": "ComfyUI", "t": 1.2}]
