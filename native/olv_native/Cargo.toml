@@ -2,6 +2,7 @@
 name = "olv_native"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.85"  # minimum; builds are pinned by Cargo.lock + --locked (a rust-toolchain.toml picked the GNU host on the PC and broke the build)
 license = "Apache-2.0"
 description = "Optional Rust (PyO3) cores for onegpu-longvideo: WER alignment and the voice RMS envelope."
 
