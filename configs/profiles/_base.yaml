@@ -67,7 +67,8 @@ editor:
     lead_pad_s: 0.15           # IN a few frames before the first word
     tail_pad_s: 0.25           # OUT after the last word on a settled frame (tail + lead = 0.3-0.5 s; R-ED3)
     internal: true             # cut repeats, stutters, fillers that the script does not have (jump cut)
-    remove: [repeat, stutter, filler]
+    remove: [repeat, stutter, filler, invented]
+    invented_min_words: 2      # a run of 2+ heard words the script does not have (babble between lines) is cut in silence
     repeat_ngram: 4
     audio_fade_ms: 30          # short fade at every audio boundary (R-ED4)
     min_segment_s: 0.2

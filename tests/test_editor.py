@@ -299,3 +299,17 @@ def test_normalize_framing_aligns_a_zoomed_clip(tmp_path):
     fin = str(tmp_path / "o" / "final.mp4")
     r = C.framing_vs(C.frame_gray(fin, 1.0), C.frame_gray(fin, 4.0))
     assert r and abs(r["scale"] - 1.0) < 0.03
+
+
+
+def test_invented_babble_between_lines_is_cut():
+    ref = "a silent gap is room for made up words. a few planned gestures face to camera"
+    heard = _w("a silent gap is room for made up words for camp fixtures the dribble is unparm a few planned gestures face to camera")
+    f = ED.find_flaws(heard, ref, invented_min=2)
+    inv = [x for x in f if x["kind"] == "invented"]
+    assert len(inv) == 1 and [w["w"] for w in heard[inv[0]["i0"]:inv[0]["i1"]]] == "for camp fixtures the dribble is unparm".split()
+    cl = ED.cut_list(heard, 20.0, f, TH)
+    assert len(cl["segments"]) == 2 and not ED.cuts_in_silence(heard, cl["segments"])
+    assert ED.find_flaws(_w(ref), ref, invented_min=2) == []          # clean speech: nothing cut
+    one = _w("a silent gap is room for made up words okay a few planned gestures face to camera")
+    assert not [x for x in ED.find_flaws(one, ref, invented_min=2) if x["kind"] == "invented"]   # one stray word stays

@@ -77,7 +77,8 @@ def word_check(clips: list[dict], prof: dict, require: bool = True) -> dict:
 
 
 # ---------------------------------------------------------------- E2
-def find_flaws(words: list[dict], reference: str, earlier: list[str] | None = None, ngram: int = 4, earlier_ref: str = "") -> list[dict]:
+def find_flaws(words: list[dict], reference: str, earlier: list[str] | None = None, ngram: int = 4, earlier_ref: str = "",
+               invented_min: int = 0) -> list[dict]:
     """Repeated runs, stutters and fillers in the heard words that the reference text does not contain.
 
     earlier = heard tokens of the previous clip (a chained clip can replay the end of the last one); earlier_ref = that clip's
@@ -121,6 +122,32 @@ def find_flaws(words: list[dict], reference: str, earlier: list[str] | None = No
             continue
         seen[g] += 1
         i += 1
+    # invented runs: 2+ heard words in a row that align to nothing in the script (the model babbled between two lines)
+    if ref and invented_min > 0:
+        from .qa import wer as WER
+
+        tok_of = []                       # heard token -> word index
+        hyp = []
+        covered = {i for f in flaws for i in range(f["i0"], f["i1"])}
+        for wi, w in enumerate(words):
+            if wi in covered:             # align only what stays: else the first copy of a cut replay looked "invented"
+                continue
+            for t in WER.normalize(w["w"]):
+                hyp.append(t)
+                tok_of.append(wi)
+        ins_tok = {hj for op, ri, hj in WER.align(WER.normalize(reference), hyp) if op == "I"}
+        toks_of_word: dict[int, list[int]] = {}
+        for k, wi in enumerate(tok_of):
+            toks_of_word.setdefault(wi, []).append(k)
+        bad = sorted(wi for wi, ks in toks_of_word.items() if wi not in covered and all(k in ins_tok for k in ks))
+        run: list[int] = []
+        for wi in bad + [None]:
+            if wi is not None and (not run or wi == run[-1] + 1):
+                run.append(wi)
+                continue
+            if len(run) >= invented_min:
+                flaws.append({"kind": "invented", "i0": run[0], "i1": run[-1] + 1})
+            run = [wi] if wi is not None else []
     return flaws
 
 
@@ -357,7 +384,8 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         info = C.probe(c["video"]) if not dry_run or Path(c["video"]).exists() else {"duration": 0, "width": 0, "height": 0, "fps": 24, "has_audio": True}
         words = heard_words(json.loads(Path(c["wer"]).read_text())) if c["wer"] else []
         flaws = find_flaws(words, ref_lines.get(c["clip"], ""), prev_tokens, ngram=ed["cuts"]["repeat_ngram"],
-                           earlier_ref=ref_lines.get(prev_clip, "")) if words else []
+                           earlier_ref=ref_lines.get(prev_clip, ""),
+                           invented_min=ed["cuts"]["invented_min_words"] if "invented" in ed["cuts"]["remove"] else 0) if words else []
         prev_clip = c["clip"]
         cl = cut_list(words, info["duration"], flaws, prof)
         bad = cuts_in_silence(words, cl["segments"])
