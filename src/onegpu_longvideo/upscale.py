@@ -30,6 +30,7 @@ OPTS = ("cudnn_bench", "channels_last", "overlap", "interp_half", "hwdec", "trit
 
 def _ts_path(model_path: str) -> str:
     import hashlib
+
     import torch
     st = os.stat(model_path)
     key = hashlib.sha256(f"{os.path.abspath(model_path)}|{st.st_size}|{st.st_mtime_ns}|{torch.__version__}".encode()).hexdigest()[:16]

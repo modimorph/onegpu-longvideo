@@ -5,7 +5,9 @@ torch.profiler (CPU + CUDA), then writes <out_dir>/step<k>_kernels.txt (top kern
 <out_dir>/step<k>_summary.json (wall, CUDA busy, buckets: int8/int4 GEMM, attention, memcpy H2D, other) and a chrome trace.
 Every call's wall time (synchronized) is also logged. Copy into ComfyUI/custom_nodes/ to use.
 """
-import json, os, time
+import json
+import os
+import time
 
 import torch
 

@@ -10,7 +10,12 @@ OLVUpscaleVideoSave(images, audio, upscale_model, width, height, fps, quality, f
   thread feeds ffmpeg. Output: <ComfyUI output>/<prefix>_NNNNN_.mp4, reported like SaveVideo.
 Install: copy into ComfyUI/custom_nodes/. Inert unless a graph uses it.
 """
-import os, queue, subprocess, tempfile, threading, wave
+import os
+import queue
+import subprocess
+import tempfile
+import threading
+import wave
 
 import numpy as np
 import torch
@@ -55,9 +60,11 @@ class OLVUpscaleVideoSave:
     CATEGORY = "onegpu"
 
     def run(self, images, audio, upscale_model, width, height, fps, quality, filename_prefix, save_raw=True):
-        import math, time as _time
-        import folder_paths
+        import math
+        import time as _time
+
         import comfy.model_management as mm
+        import folder_paths
         t_start = _time.perf_counter()
         out_dir, fname, counter, subfolder, _ = folder_paths.get_save_image_path(filename_prefix, folder_paths.get_output_directory())
         os.makedirs(out_dir, exist_ok=True)

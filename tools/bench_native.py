@@ -7,6 +7,7 @@ import timeit
 
 import numpy as np
 import olv_native
+
 from onegpu_longvideo import voice
 from onegpu_longvideo.qa import wer
 

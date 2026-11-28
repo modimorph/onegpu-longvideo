@@ -12,9 +12,9 @@ import sys
 import time
 
 T = {}
-t = time.perf_counter(); import numpy as np; import torch; T["import_torch_s"] = time.perf_counter() - t
+t = time.perf_counter(); import numpy as np; import torch; T["import_torch_s"] = time.perf_counter() - t  # noqa: E402,I001  (timed on purpose)
 t = time.perf_counter(); torch.zeros(1).cuda(); torch.cuda.synchronize(); T["cuda_init_s"] = time.perf_counter() - t
-t = time.perf_counter(); import spandrel; T["import_spandrel_s"] = time.perf_counter() - t
+t = time.perf_counter(); import spandrel; T["import_spandrel_s"] = time.perf_counter() - t  # noqa: E402,I001  (timed on purpose)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from onegpu_longvideo import upscale as U  # noqa: E402
 
@@ -55,7 +55,8 @@ def run(name, opts, ref=None):
         r["psnr"] = "inf" if mse == 0 else round(10 * math.log10(255 ** 2 / mse), 2)
         r["frames_cmp"] = stats["n"]
         exact = all(k in EXACT for k in opts if opts[k])
-        r["gate"] = "FAIL" if stats["n"] != len(ref) or not ref else "pass" if (stats["maxabs"] == 0 if exact else (mse == 0 or (10 * math.log10(255 ** 2 / mse) >= 50 and stats["maxabs"] <= 3))) else "FAIL"
+        ok = (stats["maxabs"] == 0) if exact else (mse == 0 or (10 * math.log10(255 ** 2 / mse) >= 50 and stats["maxabs"] <= 3))
+        r["gate"] = "pass" if (stats["n"] == len(ref) and ref and ok) else "FAIL"
     print(json.dumps(r), flush=True)
     return r, frames
 
@@ -63,6 +64,7 @@ def run(name, opts, ref=None):
 def micro():
     """Per-component GPU time on one real batch of 8 frames (CUDA events, median of 20)."""
     import subprocess
+
     import torch.nn.functional as F
     pr = U.probe(inp)
     w, h = pr["width"], pr["height"]

@@ -8,15 +8,16 @@ usage: python convert_w4a4.py SRC.safetensors DST.safetensors [--linear-dtype in
   --check N  report the relative weight error (W4A4 vs int8 dequant) on every N-th module
   --bench    time one real-shape linear (int8 convrot vs W4A4) and compare outputs
 """
-import argparse, json, time
-
-import torch
-from safetensors import safe_open
-from safetensors.torch import save_file
+import argparse
+import json
+import time
 
 import comfy_kitchen  # noqa: F401  (registers torch.ops.comfy_kitchen)
+import torch
 from comfy_kitchen.tensor import QuantizedTensor, TensorWiseINT8Layout
 from comfy_kitchen.tensor.convrot_w4a4 import TensorCoreConvRotW4A4Layout
+from safetensors import safe_open
+from safetensors.torch import save_file
 
 
 def cfg_of(f, k):
