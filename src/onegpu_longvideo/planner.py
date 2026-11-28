@@ -673,8 +673,10 @@ def calibrate(plan_d: dict, words_dir: str | Path, prof: dict) -> dict:
     by_len: dict[float, list] = {}
     for r in rows:
         by_len.setdefault(round(r["seconds"], 1), []).append(r["rate_wps"])
-    med = {k: sorted(v)[len(v) // 2] for k, v in by_len.items()}
-    overall = sorted(r["rate_wps"] for r in rows)[len(rows) // 2]
+    from statistics import median    # true median (two clips: their mean, not the faster one)
+
+    med = {k: round(median(v), 2) for k, v in by_len.items()}
+    overall = round(median(r["rate_wps"] for r in rows), 2)
     late = [r for r in rows if r["late_s"] > sp["deadline_tolerance_s"]]
     sug = {"wps": [round(overall * 0.95, 2), round(overall * 1.05, 2)], "wps_nominal": round(overall, 2),
            "lint_max_wps": max(sp["lint_max_wps"], round(overall * 1.1, 2))}
