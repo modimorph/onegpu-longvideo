@@ -4,6 +4,9 @@
 param([string]$Repo = ".", [string]$Py = "python", [string]$Maturin = "maturin", [string]$HelperPy = "python")
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 $Repo = (Resolve-Path $Repo).Path  # before Push-Location, so relative paths cannot point into native\olv_native
+# byte-identical .pyd from any checkout path (measured 28 Nov 2026: same hash from two folders): no paths, no link timestamp
+$env:SOURCE_DATE_EPOCH = "1764288000"
+$env:RUSTFLAGS = "--remap-path-prefix=$Repo=. --remap-path-prefix=$env:USERPROFILE=~ -C link-arg=/Brepro -C link-arg=/PDBALTPATH:olv_native.pdb"
 $t0 = Get-Date
 Push-Location "$Repo\native\olv_native"
 & $Maturin build --release --locked -i $Py -o "$Repo\native\wheels" 2>&1 | Select-Object -Last 2
