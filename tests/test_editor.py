@@ -313,3 +313,10 @@ def test_invented_babble_between_lines_is_cut():
     assert ED.find_flaws(_w(ref), ref, invented_min=2) == []          # clean speech: nothing cut
     one = _w("a silent gap is room for made up words okay a few planned gestures face to camera")
     assert not [x for x in ED.find_flaws(one, ref, invented_min=2) if x["kind"] == "invented"]   # one stray word stays
+
+
+
+def test_percent_sign_as_its_own_word_is_kept():
+    words = ED.heard_words({"words": [{"w": "eighty", "t0": 0, "t1": 0.2}, {"w": "seven", "t0": 0.2, "t1": 0.4}, {"w": "%", "t0": 0.4, "t1": 0.6},
+                                      {"w": "...", "t0": 0.6, "t1": 0.7}]})
+    assert [w["w"] for w in words] == ["eighty", "seven", "%"]

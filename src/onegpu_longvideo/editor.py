@@ -50,7 +50,10 @@ def find_clips(clips_dir: str | Path, wer_dir: str | Path | None = None) -> list
 
 def heard_words(wer_json: dict) -> list[dict]:
     """Word list with times from an `olv wer --out` file ('words': [{w, t0, t1}])."""
-    return [{"w": w["w"], "t0": float(w["t0"]), "t1": float(w["t1"])} for w in wer_json.get("words", []) if _norm(w["w"])]
+    from .qa.wer import normalize
+
+    # keep every word the word check can score: "%" alone is a word ("percent"); dropping it made "percent" look missing
+    return [{"w": w["w"], "t0": float(w["t0"]), "t1": float(w["t1"])} for w in wer_json.get("words", []) if normalize(str(w["w"]))]
 
 
 # ---------------------------------------------------------------- E1
