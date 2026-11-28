@@ -63,6 +63,7 @@ It reports the measured rate per clip, the clips past the deadline and a band of
 | documentary | 2.4-2.9 | 3-5 per 3 min, waist-up, close for emphasis | 0.35 | max shot 40 s, lower third |
 
 ## Limits (untested until the production test)
+- Fake-action rules are English first (plus German and French fillers); a German self-correction ("... nein, fast") is not caught.
 - Fewer gestures (0.4 per line) may change lip sync or WER. The old recipe tied one gesture to each line.
 - A second camera set-up needs a reference still at that angle; identity hold at 30 degrees is untested.
 - The text pass is rules plus an optional LLM review. It does not judge facts or logic by itself.

@@ -8,7 +8,7 @@ flowchart LR
     C["clipN/video.mp4 + clipN/wer.json"] --> E1["E1 word check"] --> E2["E2 cut list"] --> E3["E3 colour match"]
     PJ["plan.json"] --> E2
     PJ --> E3
-    E3 --> E4["E4 assemble<br/>punch-in, lower third, x264"] --> E5["E5 loudness<br/>2-pass, AAC measured"] --> E6["E6 review<br/>7x6 sheet + QA"]
+    E3 --> E4["E4 assemble<br/>punch-in, lower third, x264"] --> E5["E5 loudness<br/>gain + limiter, AAC measured"] --> E6["E6 review<br/>7x6 sheet + QA"]
     E6 --> O["final.mp4, contact_sheet.jpg, edit_qa.json, edl.json"]
 ```
 
@@ -16,9 +16,11 @@ flowchart LR
 
 ```bash
 # per clip, after the render (word times are stored in the --out file)
-olv wer clips/clip1/audio.wav plan/prompts/clip1.lines.txt --seconds 10 --out clips/clip1/wer.json
+olv wer clips/clip1/audio.wav plan/prompts/clip1.lines.txt --seconds 10 --out wer/clip1.wer.json
+# or score word times made elsewhere (faster-whisper on another machine): [{"w", "t0", "t1"}]
+olv wer - plan/prompts/clip1.lines.txt --seconds 10 --words words/clip1.json --out wer/clip1.wer.json
 # whole film
-olv edit clips/ --plan plan/plan.json --out edit/ [--title "Title" --subtitle "Line two"] [--dry-run]
+olv edit clips/ --plan plan/plan.json --wer-dir wer/ --out edit/ [--title "Title" --subtitle "Line two"] [--dry-run]
 ```
 
 Exit code 1 when an editor gate fails (G8-G13). `--dry-run` writes `edl.json` and the ffmpeg command without encoding. `--no-wer` allows clips without `wer.json`.

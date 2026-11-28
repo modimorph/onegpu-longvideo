@@ -4,7 +4,7 @@ Video: ______  Date: ______  Run folder: ______  Seed(s) tried: ______
 
 Gates are in [FLOW.md](FLOW.md). Tick a box only after its gate passes.
 
-- [ ] 1 Script: `olv plan` gates G1-G6 pass (no fake actions, no repeated sentence, words in band, last word by S - 1.7 s, angle and gesture plan in band)
+- [ ] 1 Script: `olv plan` gates G1-G7 and G2F pass (no fake actions, no repeated sentence, words in band, last word by S - 1.7 s, angle and gesture plan in band)
 - [ ] 2 Prompt: built by `olv plan` from the plan, G7 lint clean, one locked camera per clip
 - [ ] 3 Assets: FLUX look image (about 720p), empty set plate (no person), voice reference you own
 - [ ] 4 Recipe: copied from `configs/flow.default.yaml`; guidance 1.0, Euler, 8 steps, identity 0.8, realism 0.3, VSA 10 %, seed 7329
