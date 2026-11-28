@@ -96,3 +96,12 @@ def test_fifteen_vs_15_is_not_an_error():
     from onegpu_longvideo.qa import wer
     heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("Push it past 15 and it slips.".split())]
     assert wer.score("Push it past fifteen and it slips.", heard, 5.0)["wer"] == 0
+
+
+
+@pytest.mark.parametrize("uk,us", [("colour", "color"), ("the colours", "the colors"), ("colour graded", "color graded"),
+                                   ("grey", "gray"), ("organised", "organized"), ("analysing", "analyzing"), ("favourite", "favorite")])
+def test_british_and_american_spellings_match(uk, us):
+    from onegpu_longvideo.qa import wer
+    assert wer.normalize(uk) == wer.normalize(us)
+    assert wer.normalize("promise") == ["promise"] and wer.normalize("our hour") == ["our", "hour"]

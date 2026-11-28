@@ -58,12 +58,32 @@ def _numbers(tokens: list[str]) -> list[str]:
     return out
 
 
+# British -> American spellings (Whisper writes American; a British script made "colour" vs "color" a word error).
+_OUR = "colour favour behaviour honour labour neighbour flavour humour harbour rumour vapour savour armour endeavour".split()
+_SPELL = {**{w: w.replace("our", "or") for w in _OUR}, "grey": "gray", "centre": "center", "metre": "meter", "litre": "liter",
+          "theatre": "theater", "fibre": "fiber", "programme": "program", "catalogue": "catalog", "dialogue": "dialog",
+          "analyse": "analyze", "organise": "organize", "recognise": "recognize", "realise": "realize", "optimise": "optimize",
+          "apologise": "apologize", "customise": "customize", "prioritise": "prioritize", "summarise": "summarize",
+          "travelled": "traveled", "travelling": "traveling", "modelling": "modeling", "cancelled": "canceled", "labelled": "labeled"}
+
+
+def _spell(w: str) -> str:
+    if w in _SPELL:
+        return _SPELL[w]
+    for base, us in _SPELL.items():          # colours, coloured, organised, organising, analysed ...
+        if base.endswith("e") and w.startswith(base[:-1]) and w[len(base) - 1:] in ("es", "ed", "ing", "er", "ers"):
+            return us[:-1] + w[len(base) - 1:]
+        if not base.endswith("e") and w.startswith(base) and w[len(base):] in ("s", "ed", "ing", "ful", "ite", "ites", "less"):
+            return us + w[len(base):]
+    return w
+
+
 def normalize(s: str) -> list[str]:
     """Lower-case words; Unicode letters stay inside one word (an ASCII-only class split "größe" into two tokens);
     numbers in one form (digits): "fifteen" and "15" match, "10%" and "ten percent" match, "1,080" = "1080"."""
     s = re.sub(r"(?<=\d),(?=\d{3}\b)", "", s.lower()).replace("%", " percent ")
     s = re.sub(r"\b(\d+)p\b", r"\1", s)                         # "1080p" -> "1080"
-    return _numbers(re.sub(r"[^\w' ]+|_", " ", s.replace("-", " ")).split())
+    return [_spell(w) for w in _numbers(re.sub(r"[^\w' ]+|_", " ", s.replace("-", " ")).split())]
 
 
 def align(ref: list[str], hyp: list[str]) -> list[tuple[str, int | None, int | None]]:
