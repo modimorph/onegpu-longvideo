@@ -6,7 +6,7 @@ Stages (docs/EDITOR.md):
                     Cut points sit in the silence between words; every audio boundary gets a short fade.
   E3 colour match   every clip matched to the anchor grade (Reinhard transfer in Lab, one LUT per clip).
   E4 assemble       punch-in where the plan asks, optional lower third, frame-exact concat, x264 encode.
-  E5 loudness       two-pass loudnorm to the profile target (YouTube: -14 LUFS), true peak measured on the AAC file.
+  E5 loudness       gain to the profile target (YouTube: -14 LUFS) plus a peak limiter, true peak measured on the AAC file.
   E6 review         7x6 contact sheet (42 frames evenly spaced) and QA numbers with pass/fail gates.
 Needs ffmpeg and ffprobe on PATH. No GPU. Source clips are never modified.
 """
@@ -176,13 +176,6 @@ def measure_loudness(path: str) -> dict:
     return {"I": get("I"), "LRA": get("LRA"), "TP": get("Peak")}
 
 
-def _loudnorm_pass1(path: str, au: dict) -> dict:
-    r = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", path, "-map", "0:a:0",
-                        "-af", f"loudnorm=I={au['lufs']}:TP={au['true_peak']}:LRA={au['lra']}:print_format=json", "-f", "null", "-"],
-                       capture_output=True, text=True)
-    return json.loads(r.stderr[r.stderr.rfind("{"):r.stderr.rfind("}") + 1])
-
-
 def _pcm(path: str, start: float, dur: float, sr: int = 8000):
     import numpy as np
 
@@ -307,10 +300,12 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
             vf = f"[{ci}:v]trim=start_frame={f0}:end_frame={f1},setpts=PTS-STARTPTS"
             if c.get("punch_in"):
                 vf += f",crop=iw/{z}:ih/{z}"
-            vf += f",scale={W}:{H}:flags=lanczos,setsar=1,fps={fps}"
+            # Untagged sources are read as BT.709 TV range (same as the colour stats). Without explicit matrices, concat lets
+            # swscale guess per segment, and an untagged clip next to a tagged one shifted by dE76 1.7 (measured).
+            vf += f",scale={W}:{H}:flags=lanczos:in_color_matrix=bt709:out_color_matrix=bt709:in_range=tv:out_range=tv,setsar=1,fps={fps}"
             if c.get("cube"):
                 vf += "," + C.LUT_CHAIN.format(cube=c["cube"])
-            vf += f",format=yuv420p[v{k}]"
+            vf += f",format=yuv420p,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv[v{k}]"
             d = (f1 - f0) / fps
             af = (f"[{ci}:a]aresample={sr},aformat=sample_rates={sr}:channel_layouts=stereo,apad,"
                   f"atrim=start_sample={s0}:end_sample={s1},asetpts=PTS-STARTPTS")
@@ -336,7 +331,8 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     enc = ed["encode"]
     assembled = out / "assembled.mkv"
     cmd = ["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", ";".join(fc), "-map", vlast, "-map", "[ac]",
-           "-c:v", "libx264", "-preset", enc["preset"], "-crf", str(enc["crf"]), "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", str(assembled)]
+           "-c:v", "libx264", "-preset", enc["preset"], "-crf", str(enc["crf"]), "-pix_fmt", "yuv420p",
+           "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv", "-c:a", "pcm_s16le", str(assembled)]
     qa["ffmpeg_assemble"] = cmd
     edl = {"segments": [{"clip": c["clip"], "segments": c["segments"], "cuts": c["cuts"], "punch_in": c.get("punch_in"), "lut": bool(c.get("cube"))}
                         for c in qa["clips"]]}  # frame-exact ranges are added to edit_qa.json (segments_frames)
@@ -356,22 +352,38 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         else:
             raise
 
-    # E5 loudness: pass 1 measure, pass 2 linear normalise, measure the AAC file, tighten TP and retry (max 3)
-    au = dict(ed["audio"])
+    # E5 loudness: measure, apply gain to the target plus a peak limiter, measure the AAC file, correct gain and limit, retry.
+    # loudnorm in linear mode cannot raise peaky dialogue to -14 LUFS under a -2 dBTP ceiling (it fell back and gave -16.9 LUFS),
+    # so the limiter takes the peaks and the loop checks the true peak after the AAC encode.
+    target_i, target_tp, tol = ed["audio"]["lufs"], ed["audio"]["true_peak"], ed["audio"]["lufs_tol"]
     final = out / "final.mp4"
-    m1 = _loudnorm_pass1(str(assembled), au)
+    m0 = measure_loudness(str(assembled))
+    gain, limit_db = target_i - m0["I"], target_tp - 1.0
     tries = []
-    for _ in range(3):
-        af = (f"loudnorm=I={au['lufs']}:TP={au['true_peak']}:LRA={au['lra']}:measured_I={m1['input_i']}:measured_TP={m1['input_tp']}:"
-              f"measured_LRA={m1['input_lra']}:measured_thresh={m1['input_thresh']}:offset={m1['target_offset']}:linear=true,aresample=48000")
+    au = ed["audio"]
+    for _ in range(6):
+        # rumble cut, gain, delay-compensated peak limiter (alimiter without latency=1 shifted the audio 5 ms; caught by G13).
+        # A fixed-threshold compressor before the limiter ate the gain (measured: -15.9 LUFS after 6 tries); not used.
+        af = (f"highpass=f={au['highpass_hz']},volume={gain:.2f}dB,"
+              f"alimiter=limit={10 ** (limit_db / 20):.4f}:attack=5:release=50:level=false:latency=1,aresample=48000")
         _run(["ffmpeg", "-v", "error", "-y", "-i", str(assembled), "-map", "0:v", "-map", "0:a", "-c:v", "copy", "-af", af,
               "-c:a", "aac", "-b:a", f"{enc['audio_kbps']}k", "-movflags", "+faststart", str(final)])
         lm = measure_loudness(str(final))
-        tries.append({"tp_target": au["true_peak"], **lm})
-        if lm["TP"] <= ed["audio"]["true_peak"] + 0.05 and abs(lm["I"] - ed["audio"]["lufs"]) <= ed["audio"]["lufs_tol"]:
+        tries.append({"gain_db": round(gain, 2), "limit_db": round(limit_db, 2), **lm})
+        ok_i, ok_tp = abs(lm["I"] - target_i) <= min(tol, 0.5), lm["TP"] <= target_tp + 0.05
+        if ok_i and ok_tp:
             break
-        au["true_peak"] = round(au["true_peak"] - max(0.3, lm["TP"] - ed["audio"]["true_peak"] + 0.2), 2)
-    qa["loudness"] = {"target": ed["audio"], "tries": tries, "final": tries[-1]}
+        if not ok_tp:
+            limit_db -= max(0.3, lm["TP"] - target_tp + 0.1)
+        # secant step: under limiting, 1 dB of gain buys less than 1 LU, so use the slope of the last two tries
+        slope = 1.0
+        if len(tries) >= 2 and tries[-1]["gain_db"] != tries[-2]["gain_db"]:
+            slope = min(1.0, max(0.2, (tries[-1]["I"] - tries[-2]["I"]) / (tries[-1]["gain_db"] - tries[-2]["gain_db"])))
+        gain += (target_i - lm["I"]) / slope
+    reduction = round(tries[-1]["gain_db"] - (tries[-1]["I"] - m0["I"]), 1)   # loudness lost to compression and limiting
+    if reduction > au["max_reduction_db"]:
+        qa.setdefault("warnings", []).append(f"dynamics took {reduction} dB of loudness (> {au['max_reduction_db']}): listen for pumping")
+    qa["loudness"] = {"target": ed["audio"], "input": m0, "tries": tries, "final": tries[-1], "dynamics_reduction_db": reduction}
 
     # E3 measured after: per clip in the final timeline + joins
     fin = C.probe(str(final))

@@ -83,6 +83,8 @@ def test_edit_end_to_end(tmp_path):
     before = [c["colour_before"]["dE76_vs_anchor"] for c in qa["clips"]]
     after = [c["colour_after"]["dE76_vs_anchor"] for c in qa["clips"]]
     assert max(before) > 3 and max(after) < max(before) / 2, (before, after)
+    assert after[0] < 0.3, after          # the anchor clip keeps its pixels (no implicit colour-matrix guess at the concat)
+    assert qa["final"]["width"] == 320 and qa["loudness"]["final"]["TP"] <= -1.95
     assert qa["contact_sheet"]["frames"] == 42 and len(qa["contact_sheet"]["t"]) == 42
 
 
