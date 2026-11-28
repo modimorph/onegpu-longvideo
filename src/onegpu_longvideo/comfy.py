@@ -7,8 +7,8 @@ from __future__ import annotations
 import json
 import os
 import time
-import urllib.parse
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path

@@ -119,8 +119,8 @@ class OLVUpscaleVideoSave:
             for _ in range(3):
                 pins.put(torch.empty((B, height, width, 3), dtype=torch.uint8, pin_memory=True))
             if raw is not None:
-                rt = threading.Thread(target=raw_writer); rt.start()
-            wt = threading.Thread(target=writer); wt.start()
+                t_ = threading.Thread(target=raw_writer); t_.start(); rt = t_  # assigned only once started (cleanup joins it)
+            t_ = threading.Thread(target=writer); t_.start(); wt = t_
             with torch.inference_mode():
                 for i in range(0, T, B):
                     # rgb24 levels exactly as ComfyUI's video encoder makes them ((x*255).clamp(0,255).to(uint8): truncation)

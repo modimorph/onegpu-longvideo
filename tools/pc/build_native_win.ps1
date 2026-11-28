@@ -13,6 +13,7 @@ if ($rc -ne 0) { "maturin build failed ($rc): nothing installed"; exit $rc }
 $whl = Get-ChildItem "$Repo\native\wheels" -Filter *win_amd64.whl | Where-Object { $_.LastWriteTime -ge $t0 } | Sort-Object LastWriteTime | Select-Object -Last 1
 if (-not $whl) { "no wheel written by this build: nothing installed"; exit 1 }
 & $HelperPy -m pip install -q --no-deps --upgrade --target "$Repo\src" $whl.FullName
+if ($LASTEXITCODE -ne 0) { "pip install of $($whl.Name) failed ($LASTEXITCODE)"; exit $LASTEXITCODE }
 # pip --upgrade replaces the package folder: re-copy a Linux build (for the WSL WER stage) if one exists
 $lin = Get-ChildItem "$Repo\native\wheels" -Filter *manylinux*.whl -ErrorAction SilentlyContinue | Select-Object -Last 1
 if ($lin) { $z = "$env:TEMP\olv_lin.zip"; Copy-Item $lin.FullName $z -Force; Expand-Archive $z "$env:TEMP\olv_lin" -Force

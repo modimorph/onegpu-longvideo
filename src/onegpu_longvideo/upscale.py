@@ -145,6 +145,7 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
         return False
 
     rerr: list = []
+    reof = threading.Event()
 
     def reader():
         try:
@@ -153,6 +154,7 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
                 for _ in range(batch):
                     b = dec.stdout.read(fsz)
                     if len(b) < fsz:
+                        reof.set()  # clean end of the decoder's stream: its exit status decides success
                         break
                     buf.append(np.frombuffer(b, np.uint8).reshape(h, w, 3))
                 if buf and not put_in(np.stack(buf)):
@@ -260,8 +262,15 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
         qout.put(None)
         wt.join()
         enc.wait()
-        dec_killed = dec.poll() is None
-        if dec_killed:
+        dec_killed = False
+        if reof.is_set():  # normal end: wait for the decoder's own exit status instead of killing it
+            try:
+                dec.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                dec_killed = True
+        else:
+            dec_killed = dec.poll() is None  # cancellation (error or early stop): kill is expected, status ignored
+        if dec_killed or dec.poll() is None:
             dec.kill()
         dec.wait()
         torch.backends.cudnn.benchmark = cudnn_prev
