@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from onegpu_longvideo.qa import detectors as D
 from onegpu_longvideo.qa import wer as Wr
@@ -80,3 +81,18 @@ def test_merge_windows():
 def test_normalize_keeps_unicode_words():
     from onegpu_longvideo.qa import wer
     assert wer.normalize("Größe, naïve café") == ["größe", "naïve", "café"]
+
+
+
+@pytest.mark.parametrize("a,b", [("fifteen seconds", "15 seconds"), ("eighty-seven words", "87 words"), ("ten-eighty", "1080"),
+                                 ("at full ten-eighty", "at full 1080p"), ("forty five", "45"), ("ten percent", "10%"),
+                                 ("two hundred and five", "205"), ("one thousand", "one thousand"), ("twenty four gigabytes", "24 gigabytes")])
+def test_numbers_match_in_either_form(a, b):
+    from onegpu_longvideo.qa import wer
+    assert wer.normalize(a) == wer.normalize(b)
+
+
+def test_fifteen_vs_15_is_not_an_error():
+    from onegpu_longvideo.qa import wer
+    heard = [wer.Word(t, i * 0.4, i * 0.4 + 0.3) for i, t in enumerate("Push it past 15 and it slips.".split())]
+    assert wer.score("Push it past fifteen and it slips.", heard, 5.0)["wer"] == 0

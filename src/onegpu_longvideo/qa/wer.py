@@ -18,9 +18,52 @@ class Word:
     prob: float = 1.0
 
 
+_UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+                                     "sixteen seventeen eighteen nineteen".split())}
+_TENS = {w: 10 * i for i, w in enumerate("_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()) if w != "_"}
+
+
+def _numbers(tokens: list[str]) -> list[str]:
+    """Spoken numbers -> digits, so a script that spells numbers matches an ASR that writes digits.
+    "fifteen" -> 15, "eighty seven" -> 87, "two hundred and five" -> 205, "ten eighty" -> 1080 (two 10-99 groups in a row)."""
+    out, i = [], 0
+
+    def group(j):            # one number below 1000 starting at j -> (value, next index) or (None, j)
+        val, k, seen = 0, j, False
+        if k < len(tokens) and tokens[k] in _UNITS and k + 1 < len(tokens) and tokens[k + 1] == "hundred":
+            val, k, seen = _UNITS[tokens[k]] * 100, k + 2, True
+            if k < len(tokens) and tokens[k] == "and" and k + 1 < len(tokens) and (tokens[k + 1] in _UNITS or tokens[k + 1] in _TENS):
+                k += 1
+        if k < len(tokens) and tokens[k] in _TENS:
+            val, k, seen = val + _TENS[tokens[k]], k + 1, True
+            if k < len(tokens) and tokens[k] in _UNITS and _UNITS[tokens[k]] < 10:
+                val, k = val + _UNITS[tokens[k]], k + 1
+        elif k < len(tokens) and tokens[k] in _UNITS:
+            val, k, seen = val + _UNITS[tokens[k]], k + 1, True
+        return (val, k) if seen else (None, j)
+
+    while i < len(tokens):
+        v, j = group(i)
+        if v is None:
+            out.append(tokens[i])
+            i += 1
+            continue
+        v2, j2 = group(j)
+        if v2 is not None and 10 <= v <= 99 and 10 <= v2 <= 99:      # "ten eighty", "nineteen ninety"
+            out.append(f"{v}{v2:02d}")
+            i = j2
+        else:
+            out.append(str(v))
+            i = j
+    return out
+
+
 def normalize(s: str) -> list[str]:
-    """Lower-case words; Unicode letters stay inside one word (an ASCII-only class split "größe" into two tokens)."""
-    return re.sub(r"[^\w' ]+|_", " ", s.lower().replace("-", " ")).split()
+    """Lower-case words; Unicode letters stay inside one word (an ASCII-only class split "größe" into two tokens);
+    numbers in one form (digits): "fifteen" and "15" match, "10%" and "ten percent" match, "1,080" = "1080"."""
+    s = re.sub(r"(?<=\d),(?=\d{3}\b)", "", s.lower()).replace("%", " percent ")
+    s = re.sub(r"\b(\d+)p\b", r"\1", s)                         # "1080p" -> "1080"
+    return _numbers(re.sub(r"[^\w' ]+|_", " ", s.replace("-", " ")).split())
 
 
 def align(ref: list[str], hyp: list[str]) -> list[tuple[str, int | None, int | None]]:
