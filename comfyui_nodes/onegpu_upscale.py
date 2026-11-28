@@ -72,11 +72,37 @@ class OLVUpscaleVideoSave:
                                     "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "19",
                                     "-b:v", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", os.path.join(out_dir, raw_file)],
                                    stdin=subprocess.PIPE)
-        enc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps),
-                                "-i", "-", "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr",
-                                "-cq", str(quality), "-b:v", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
-                                "-map_metadata", "-1", "-metadata", "comment=AI-generated", "-movflags", "+faststart", out],
-                               stdin=subprocess.PIPE)
+        try:
+            enc = subprocess.Popen(["ffmpeg", "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width}x{height}", "-r", str(fps),
+                                    "-i", "-", "-i", wav, "-map", "0:v", "-map", "1:a", "-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr",
+                                    "-cq", str(quality), "-b:v", "0", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+                                    "-map_metadata", "-1", "-metadata", "comment=AI-generated", "-movflags", "+faststart", out],
+                                   stdin=subprocess.PIPE)
+        except Exception:  # reap the raw encoder and drop the temp wav before re-raising
+            if raw is not None:
+                raw.kill(); raw.wait()
+            try:
+                os.remove(wav)
+            except OSError:
+                pass
+            raise
+        rawq: queue.Queue = queue.Queue()
+        rawerr = []
+
+        def raw_writer():
+            while True:
+                fr = rawq.get()
+                if fr is None:
+                    break
+                try:
+                    if not rawerr:
+                        raw.stdin.write(fr.numpy().tobytes())
+                except Exception as e:  # noqa: BLE001
+                    rawerr.append(e)
+
+        rt = threading.Thread(target=raw_writer) if raw is not None else None
+        if rt is not None:
+            rt.start()
         B = 8
         T = images.shape[0]
         pins: queue.Queue = queue.Queue()
@@ -108,7 +134,7 @@ class OLVUpscaleVideoSave:
                     for i in range(0, T, B):
                         x8 = images[i:i + B].mul(255).round_().clamp_(0, 255).to(torch.uint8)  # rgb24 levels, like the decoded raw take
                         if raw is not None:
-                            raw.stdin.write(x8.numpy().tobytes())
+                            rawq.put(x8)
                         x = x8
                         t = x.to("cuda", non_blocking=True).permute(0, 3, 1, 2).half().div_(255)
                         y = model(t)
@@ -133,6 +159,8 @@ class OLVUpscaleVideoSave:
             except OSError as e:
                 werr.append(e)
             enc.wait()
+            if rt is not None:
+                rawq.put(None); rt.join()
             if raw is not None:
                 try:
                     raw.stdin.close()
@@ -147,6 +175,8 @@ class OLVUpscaleVideoSave:
             raise RuntimeError(f"OLVUpscaleVideoSave writer failed: {werr[0]!r}")
         if enc.returncode:
             raise RuntimeError(f"OLVUpscaleVideoSave: ffmpeg exited with {enc.returncode}")
+        if rawerr:
+            raise RuntimeError(f"OLVUpscaleVideoSave raw writer failed: {rawerr[0]!r}")
         if raw is not None and raw.returncode:
             raise RuntimeError(f"OLVUpscaleVideoSave: raw ffmpeg exited with {raw.returncode}")
         items = [{"filename": file, "subfolder": subfolder, "type": "output"}]
