@@ -44,7 +44,7 @@ class ComfyClient:
     def history(self, prompt_id: str) -> dict:
         return self._req(f"/history/{prompt_id}").get(prompt_id, {})
 
-    def wait(self, prompt_id: str, timeout_s: float = 3600, poll_s: float = 5.0) -> dict:
+    def wait(self, prompt_id: str, timeout_s: float = 3600, poll_s: float = 0.5) -> dict:
         t0 = time.time()
         while time.time() - t0 < timeout_s:
             h = self.history(prompt_id)
