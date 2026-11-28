@@ -452,9 +452,14 @@ def angle_plan(script: Script, prof: dict) -> dict:
                      "punch_in": ap["mode"] == "punch_in" and s != seq[0]})
         prev = s
     n_changes = sum(r["change_from_prev"] for r in rows)
+    refs = {}
+    for r in rows:   # one reference-still prompt per set-up that appears after the first shot (production makes these stills)
+        if r["setup"] != rows[0]["setup"] and r["setup"] not in refs and ap["mode"] == "generate":
+            tpl = (ap.get("ref_prompts") or {}).get(r["setup"]) or f"same person and place, seen as: {ap['setups'][r['setup']]}"
+            refs[r["setup"]] = tpl.format(side=run_side.get(r["setup"], ap["default_side"]))
     errors = [] if band[0] <= n_changes <= band[1] or ap["mode"] == "none" else [
         {"where": "film", "type": "angle_changes_out_of_band", "severity": "fail", "changes": n_changes, "band": band}]
-    return {"band": band, "changes": n_changes, "joins": [clips[k].idx for k in choice], "clips": rows, "errors": errors,
+    return {"band": band, "changes": n_changes, "joins": [clips[k].idx for k in choice], "clips": rows, "errors": errors, "setup_refs": refs,
             "mode": ap["mode"], "rule": "one locked camera per clip; a change is a hard cut at a clip join (sentence end)"}
 
 

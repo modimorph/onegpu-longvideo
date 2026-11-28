@@ -226,3 +226,11 @@ def test_replan_with_fewer_clips_removes_stale_prompts(tmp_path):
     PL.write(PL.plan(PL.load_script(ROOT / "configs" / "scripts" / "example_ad.yaml"), profiles.load("ad")), tmp_path)
     names = sorted(x.name for x in (tmp_path / "prompts").iterdir())
     assert names == ["clip1.lines.txt", "clip1.txt", "clip2.lines.txt", "clip2.txt", "notes.txt"]
+
+
+def test_setup_reference_prompts_follow_the_plan():
+    topics = ["graphics card render speed", "invented words problem memory", "fix tiles attention cache",
+              "voice lips timing", "quality seeds review", "repo open try"]
+    a = PL.angle_plan(_script(6, 29.96, [[f"{t} sentence about {t}."] for t in topics]), TH)
+    assert set(a["setup_refs"]) == {"B", "C"} and "three-quarter" in a["setup_refs"]["B"] and "{side}" not in a["setup_refs"]["B"]
+    assert "torso is clearly angled" in next(r["text"] for r in a["clips"] if r["setup"] == "B")

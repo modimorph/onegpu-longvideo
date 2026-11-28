@@ -27,8 +27,11 @@ planner:
     sequence: [A, B, C, A]
     setups:
       A: "frontal medium close-up at eye level, chest up, eyes to the lens"
-      B: "medium shot from a second camera about 30 degrees to the {side}, eye level, head turned slightly toward that camera"
-      C: "wider frontal medium shot, waist up, more of the room visible, eyes to the lens"
+      # B and C must read as a different camera (30-degree rule, R-AN3). A "30 degrees" edit prompt alone gave a near-frontal
+      # reframe in production (28 Nov); the torso angle and the three-quarter view are now stated explicitly.
+      B: "three-quarter medium shot from a second camera about 30 degrees to the {side}, eye level; the torso is clearly angled away from the lens and the head turns back toward the camera"
+      C: "wide frontal shot from further back, waist up, the whole desk and much more of the room visible, eyes to the lens"
+    ref_prompts: {}   # per set-up edit prompt for its reference still; default: "same person and place, seen as: <set-up text>"
   gestures:
     density: 0.4               # gestures per spoken line; every other line rests (R-GE1)
     max_per_clip: 3
