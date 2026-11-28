@@ -48,7 +48,8 @@ def load(name_or_path: str, profile_dir: str | Path | None = None) -> dict:
         raise FileNotFoundError(f"profile not found: {p} (known: {', '.join(names(profile_dir))})")
     over = yaml.safe_load(p.read_text()) or {}
     if over.get("extends"):          # a variant profile: merge over its parent (which is merged over the base)
-        base = load(str(p.parent / f"{over['extends']}.yaml"))
+        sib = p.parent / f"{over['extends']}.yaml"       # parent next to this file, else in the profile folder
+        base = load(str(sib) if sib.exists() else over["extends"], profile_dir)
         base.pop("name", None)
         base.pop("_replace", None)
     else:

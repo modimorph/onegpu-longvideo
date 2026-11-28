@@ -1,4 +1,4 @@
-"""Command line: olv plan | graph | render | upscale | lint | wer | camera | edit | flow-check | profiles."""
+"""Command line: olv plan | calibrate | graph | render | upscale | lint | wer | camera | edit | flow-check | profiles."""
 from __future__ import annotations
 
 import argparse
@@ -110,6 +110,20 @@ def cmd_plan(a):
     sys.exit(0 if plan["gates_pass"] or a.no_gate else 1)
 
 
+def cmd_calibrate(a):
+    from . import planner as PL
+    from . import profiles
+
+    plan = json.loads(Path(a.plan).read_text())
+    name = a.profile or plan.get("film", {}).get("profile") or "talking_head"
+    cal = PL.calibrate(plan, a.words_dir, profiles.load(name))
+    if a.write_profile and cal.get("clips"):
+        Path(a.write_profile).write_text(PL.calibration_profile(cal, Path(name).stem))
+        cal["profile_written"] = a.write_profile
+    print(json.dumps(cal, indent=1))
+    sys.exit(0 if cal.get("clips") else 1)
+
+
 def cmd_edit(a):
     from . import editor as ED
     from . import profiles
@@ -181,6 +195,10 @@ def main(argv=None):
     s.add_argument("--wer-dir", help="folder with clipN.wer.json files (keeps the clip folders clean)")
     s.add_argument("--no-wer", action="store_true", help="allow clips without wer.json (G8 then only covers checked clips)"); s.set_defaults(fn=cmd_edit)
     s = sub.add_parser("profiles", help="list scenario profiles"); s.set_defaults(fn=cmd_profiles)
+    s = sub.add_parser("calibrate", help="measured speaking rate of rendered clips vs the plan; suggests a speech band")
+    s.add_argument("plan"); s.add_argument("words_dir", help="folder with clipN.json word times or clipN.wer.json files")
+    s.add_argument("--profile"); s.add_argument("--write-profile", help="write a profile YAML (extends the plan's profile) with the suggested band")
+    s.set_defaults(fn=cmd_calibrate)
     s = sub.add_parser("flow-check", help="validate a run folder against the required-flow gates (docs/FLOW.md)")
     s.add_argument("run_dir"); s.set_defaults(fn=cmd_flow_check)
     a = ap.parse_args(argv)

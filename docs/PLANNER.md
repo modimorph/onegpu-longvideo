@@ -41,12 +41,21 @@ Markdown: `## Segment N (t0-t1 s): title` followed by a table `| # | a-b | spoke
 
 Talking head, 6 x 30 s (our 3-min demo script): set-ups A A B B C A (changes at 60, 120 and 150 s), 11 gestures in 36 lines (was 36 cues, 8 finger shapes), 6 fake actions auto-fixed, G3 failed on clip 2 (75 words after the fixes, band 79-86), and a fact sheet from the production data failed 6 lines (G2F: render time, gestures, camera plan, voice conversion, speech limit, takes). The writer fixed both before any render.
 
+## Calibrate the speech band from renders (`olv calibrate`)
+The band is a prediction. The model sets its own pace: in our first 10 s talking-head clip it spoke 24 words at 2.46 w/s and ended at 9.76 s, against a planned 3.0 w/s and a deadline of 8.3 s.
+```bash
+olv calibrate plan/plan.json words/ --write-profile calibrated.yaml   # words/: clipN.json word times or clipN.wer.json
+olv plan script.yaml --profile calibrated.yaml --out plan_cal/          # the calibrated profile extends the original one
+```
+It reports the measured rate per clip, the clips past the deadline and a band of +/- 5 % around the median rate. Untested: whether fewer words keep the last word earlier, or whether the model stretches them to fill the clip. Test it on one clip before re-rendering a film.
+
 ## Profiles
 `configs/profiles/_base.yaml` holds every key with the talking-head numbers. A profile lists only what differs.
 
 | Profile | Speech w/s | Angles | Gestures | Editor differences |
 |---|---|---|---|---|
 | talking_head | 2.8-3.1 | generate, 2-3 per 3 min, bookend | 0.4 per line | jump cuts for flaws only |
+| talking_head_varied | as talking_head | as talking_head | rest lines cycle 4 relaxed poses (A/B variant) | as talking_head |
 | tutorial | 2.5-2.9 | punch_in, 3-6 per 3 min | 0.25, pointing x4 | punch-in 1.15, lower third, captions |
 | podcast | 2.6-3.0 | generate, 1-2 per 3 min (wide, close) | 0.5 | fillers and stutters cut, lower third |
 | cinematic_short | 1.2-2.8 | a new shot at every join (wide, medium, close) | 0.3 | no internal cuts |

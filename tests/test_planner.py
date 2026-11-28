@@ -234,3 +234,16 @@ def test_setup_reference_prompts_follow_the_plan():
     a = PL.angle_plan(_script(6, 29.96, [[f"{t} sentence about {t}."] for t in topics]), TH)
     assert set(a["setup_refs"]) == {"B", "C"} and "three-quarter" in a["setup_refs"]["B"] and "{side}" not in a["setup_refs"]["B"]
     assert "torso is clearly angled" in next(r["text"] for r in a["clips"] if r["setup"] == "B")
+
+
+def test_calibrate_reports_measured_rate(tmp_path):
+    p = PL.plan(PL.load_script(EXAMPLE), TH)
+    for n in (1, 2):   # 24 words spread over 9.8 s: 2.45 w/s, past the 8.3 s deadline
+        words = [{"w": f"w{k}", "t0": round(k * 0.408, 3), "t1": round(k * 0.408 + 0.3, 3)} for k in range(24)]
+        (tmp_path / f"clip{n}.json").write_text(json.dumps(words))
+    cal = PL.calibrate(p, tmp_path, TH)
+    assert cal["median_rate_wps"] == pytest.approx(2.45, abs=0.05) and cal["clips_past_deadline"] == [1, 2]
+    y = tmp_path / "cal.yaml"
+    y.write_text(PL.calibration_profile(cal, "talking_head"))
+    prof = profiles.load(str(y))
+    assert prof["planner"]["speech"]["wps"][1] < 2.8 and prof["planner"]["gestures"]["rest"].startswith("rests both hands")
