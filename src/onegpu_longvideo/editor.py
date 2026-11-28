@@ -77,13 +77,16 @@ def word_check(clips: list[dict], prof: dict, require: bool = True) -> dict:
 
 
 # ---------------------------------------------------------------- E2
-def find_flaws(words: list[dict], reference: str, earlier: list[str] | None = None, ngram: int = 4) -> list[dict]:
+def find_flaws(words: list[dict], reference: str, earlier: list[str] | None = None, ngram: int = 4, earlier_ref: str = "") -> list[dict]:
     """Repeated runs, stutters and fillers in the heard words that the reference text does not contain.
 
-    earlier = heard tokens of the previous clip (a chained clip can replay the end of the last one)."""
+    earlier = heard tokens of the previous clip (a chained clip can replay the end of the last one); earlier_ref = that clip's
+    script, so a phrase both scripts really contain ("the end of the") is not cut."""
     toks = [_norm(w["w"]) for w in words]
     ref = [_norm(x) for x in reference.split() if _norm(x)]
+    pref = [_norm(x) for x in earlier_ref.split() if _norm(x)]
     ref_grams = Counter(tuple(ref[i:i + ngram]) for i in range(len(ref) - ngram + 1))
+    ref_grams.update(tuple(pref[i:i + ngram]) for i in range(len(pref) - ngram + 1))
     ref_bigrams = Counter(zip(ref, ref[1:]))
     flaws, i = [], 0
     # stutters: the same word twice in a row with a short gap -> drop the first copy
@@ -103,7 +106,12 @@ def find_flaws(words: list[dict], reference: str, earlier: list[str] | None = No
     while i <= len(toks) - ngram:
         g = tuple(toks[i:i + ngram])
         if seen[g] >= max(1, ref_grams[g]) and g in seen:
+            # extend the replayed run as long as it keeps following the earlier copy ("... how it works" to the end)
+            hist = ctx + toks[:i]
+            pos = max(j for j in range(len(hist) - ngram + 1) if tuple(hist[j:j + ngram]) == g)
             L = ngram
+            while i + L < len(toks) and pos + L < len(hist) and toks[i + L] == hist[pos + L]:
+                L += 1
             flaws.append({"kind": "repeat", "i0": i, "i1": min(len(toks), i + L)})
             for k in range(i, min(len(toks), i + L) - ngram + 1):
                 seen[tuple(toks[k:k + ngram])] += 1
@@ -119,12 +127,21 @@ def cut_list(words: list[dict], duration: float, flaws: list[dict], prof: dict) 
     cu = prof["editor"]["cuts"]
     if not words:
         return {"segments": [[0.0, round(duration, 3)]], "cuts": [], "in": 0.0, "out": round(duration, 3)}
-    t_in = max(0.0, words[0]["t0"] - cu["lead_pad_s"]) if cu["trim_in"] else 0.0
-    t_out = min(duration, words[-1]["t1"] + cu["tail_pad_s"]) if cu["trim_out"] else duration
+    removed = set()
+    if cu["internal"]:
+        for f in flaws:
+            if f["kind"] in cu["remove"]:
+                removed.update(range(f["i0"], f["i1"]))
+    kept = [i for i in range(len(words)) if i not in removed]
+    if not kept:   # everything heard is a flaw (e.g. a full replay of the previous clip): drop the clip
+        return {"segments": [], "cuts": [[0.0, round(duration, 3), "all_words_flawed"]], "in": 0.0, "out": 0.0}
+    # IN/OUT from the first and last word that STAYS (a cut filler at the end left a silent 0.25 s stub before)
+    t_in = max(0.0, words[kept[0]]["t0"] - cu["lead_pad_s"]) if cu["trim_in"] else 0.0
+    t_out = min(duration, words[kept[-1]]["t1"] + cu["tail_pad_s"]) if cu["trim_out"] else duration
     cuts = []
     if cu["internal"]:
         for f in flaws:
-            if f["kind"] not in cu["remove"]:
+            if f["kind"] not in cu["remove"] or f["i0"] > kept[-1] or f["i1"] - 1 < kept[0]:
                 continue
             i0, i1 = f["i0"], f["i1"]
             a = (words[i0 - 1]["t1"] + words[i0]["t0"]) / 2 if i0 > 0 else words[i0]["t0"]
@@ -205,11 +222,12 @@ def av_check(qa: dict, final: str, fps: float) -> dict:
     tol = qa.get("_sync_tol_ms", 10.0)
     rows, t = [], 0.0
     for c in qa["clips"]:
-        for f0, f1 in c["segments_frames"]:
-            d = (f1 - f0) / fps
+        cfps = c.get("fps") or fps
+        for f0, f1, n_out in c["segments_frames"]:
+            d = n_out / fps                            # length in the final; the source starts at f0 / (clip's own rate)
             w = min(4.0, d - 0.1)                      # stay inside the segment (and past its 30 ms fades)
             off = max(0.05, (d - w) / 2)
-            lag = av_offset_ms(c["video"], f0 / fps + off, final, t + off, dur=w) if w >= 0.4 else None
+            lag = (av_offset_ms(c["video"], f0 / cfps + off, final, t + off, dur=w) if w >= 0.4 and c.get("has_audio", True) else None)
             rows.append({"clip": c["clip"], "t_final": round(t, 3), "offset_ms": lag})
             t += d
     p = C.probe(final)
@@ -242,11 +260,14 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
 
     # E2
     prev_tokens: list[str] = []
+    prev_clip = None
     errors = list(e1["errors"])
     for c in clips:
         info = C.probe(c["video"]) if not dry_run or Path(c["video"]).exists() else {"duration": 0, "width": 0, "height": 0, "fps": 24, "has_audio": True}
         words = heard_words(json.loads(Path(c["wer"]).read_text())) if c["wer"] else []
-        flaws = find_flaws(words, ref_lines.get(c["clip"], ""), prev_tokens, ngram=ed["cuts"]["repeat_ngram"]) if words else []
+        flaws = find_flaws(words, ref_lines.get(c["clip"], ""), prev_tokens, ngram=ed["cuts"]["repeat_ngram"],
+                           earlier_ref=ref_lines.get(prev_clip, "")) if words else []
+        prev_clip = c["clip"]
         cl = cut_list(words, info["duration"], flaws, prof)
         bad = cuts_in_silence(words, cl["segments"])
         if bad:
@@ -255,9 +276,20 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         qa["clips"].append({**c, **info, "flaws": [{"kind": f["kind"], "t0": words[f["i0"]]["t0"], "t1": words[f["i1"] - 1]["t1"]} for f in flaws],
                             **cl, "punch_in": punch.get(c["clip"], False)})
 
+    empty = [c["clip"] for c in qa["clips"] if not c["segments"]]
+    if empty:
+        qa.setdefault("warnings", []).append(f"clips with nothing to keep, left out: {empty}")
+        qa["clips"] = [c for c in qa["clips"] if c["segments"]]
+    if not qa["clips"]:
+        raise ValueError("no clip has anything to keep (check the word files and the cut settings)")
     W, H = qa["clips"][0]["width"] or 1280, qa["clips"][0]["height"] or 720
     fps = qa["clips"][0]["fps"] or 24
     W, H = (ed["encode"].get("width") or W), (ed["encode"].get("height") or H)
+    for c in qa["clips"]:        # mixed shapes and rates are converted, never stretched: report them
+        if c.get("width") and c.get("height") and abs(c["width"] / c["height"] - W / H) > 0.01:
+            qa.setdefault("warnings", []).append(f"clip {c['clip']} is {c['width']}x{c['height']}: letterboxed into {W}x{H}, not stretched")
+        if c.get("fps") and abs(c["fps"] - fps) > 0.01:
+            qa.setdefault("warnings", []).append(f"clip {c['clip']} runs at {c['fps']:.3f} fps: converted to {fps:.3f} fps")
 
     # E3 colour stats (on kept frames)
     tmp = Path(tempfile.mkdtemp(prefix="olv_edit_"))
@@ -268,7 +300,9 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         for c in qa["clips"]:
             a, b = c["segments"][0][0], c["segments"][-1][1]
             stats.append(C.lab_stats(list(C.frames_rgb(c["video"], step=col["sample_step"], start=a, end=b))))
-        anchor = target or stats[col["anchor_clip"] - 1]
+        ids = [c["clip"] for c in qa["clips"]]
+        a_idx = ids.index(col["anchor_clip"]) if col["anchor_clip"] in ids else 0     # anchor clip missing: first clip
+        anchor = target or stats[a_idx]
         rs = col["ramp_s"]
         for c, s in zip(qa["clips"], stats):
             c["colour_before"] = {"stats": s, "dE76_vs_anchor": C.de76(s, anchor)}
@@ -280,16 +314,14 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
                 s_b = C.lab_stats(list(C.frames_rgb(c["video"], step=2, start=b - rs, end=b)))
                 c["colour_before"].update({"start_dE76": C.de76(s_a, anchor), "end_dE76": C.de76(s_b, anchor)})
                 if max(C.de76(s_a, anchor), C.de76(s_b, anchor)) >= col["skip_below_dE"]:
-                    c["cube_a"], c["cube_b"] = str(tmp / f"clip{c['clip']}_a.cube"), str(tmp / f"clip{c['clip']}_b.cube")
-                    C.write_cube(s_a, anchor, c["cube_a"], strength=col["strength"])
-                    C.write_cube(s_b, anchor, c["cube_b"], strength=col["strength"])
+                    c["ramp"] = {"a": s_a, "b": s_b}
                 c["cube"] = None
-            elif c["clip"] == col["anchor_clip"] and not target or C.de76(s, anchor) < col["skip_below_dE"]:
+            elif c["clip"] == ids[a_idx] and not target or C.de76(s, anchor) < col["skip_below_dE"]:
                 c["cube"] = None
             else:
                 c["cube"] = str(tmp / f"clip{c['clip']}.cube")
                 C.write_cube(s, anchor, c["cube"], strength=col["strength"])
-        qa["anchor"] = {"source": "plan target" if target else f"clip {col['anchor_clip']}", "stats": anchor}
+        qa["anchor"] = {"source": "plan target" if target else f"clip {ids[a_idx]}", "stats": anchor}
 
     # E4 filter graph
     fade = ed["cuts"]["audio_fade_ms"] / 1000.0
@@ -298,42 +330,58 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     sr = 48000
     for ci, c in enumerate(qa["clips"]):
         inputs += ["-i", c["video"]]
-        n_frames = int((c.get("duration") or 0) * (c.get("fps") or fps) + 1e-6) if c.get("duration") else None
+        cfps = c.get("fps") or fps
+        n_src = int(c["duration"] * cfps + 1e-6) if c.get("duration") else None
         c["segments_frames"] = []
         kept_total = sum(b - a for a, b in c["segments"])
         kept_off = 0.0
         for a, b in c["segments"]:
-            # Sample-exact join: snap both ends to the frame grid, trim video by frame and audio by sample, so every segment's
-            # audio lasts exactly frames/fps. Unequal lengths add an audio lead at every join (seen: +48 ms per join).
-            f0, f1 = round(a * fps), round(b * fps)
-            if n_frames:
-                f1 = min(f1, n_frames)
+            # Sample-exact join. Source frames are counted at the clip's OWN rate (a 30 fps clip cut at 24 fps drifted 0.54 s).
+            # The output piece has n_out frames at the film rate, and its audio lasts exactly n_out / fps.
+            f0, f1 = round(a * cfps), round(b * cfps)
+            if n_src:
+                f1 = min(f1, n_src)
             if f1 <= f0:
                 continue
-            c["segments_frames"].append([f0, f1])
-            s0, s1 = round(f0 * sr / fps), round(f1 * sr / fps)
+            n_out = max(1, round((f1 - f0) / cfps * fps))
+            d = n_out / fps
+            s0 = round(f0 / cfps * sr)
+            c["segments_frames"].append([f0, f1, n_out])
             vf = f"[{ci}:v]trim=start_frame={f0}:end_frame={f1},setpts=PTS-STARTPTS"
             if c.get("punch_in"):
                 vf += f",crop=iw/{z}:ih/{z}"
-            # Untagged sources are read as BT.709 TV range (same as the colour stats). Without explicit matrices, concat lets
-            # swscale guess per segment, and an untagged clip next to a tagged one shifted by dE76 1.7 (measured).
-            vf += f",scale={W}:{H}:flags=lanczos:in_color_matrix=bt709:out_color_matrix=bt709:in_range=tv:out_range=tv,setsar=1,fps={fps}"
+            # Untagged sources are read as BT.709 TV range (same as the colour stats); other shapes are letterboxed.
+            vf += (f",scale={W}:{H}:flags=lanczos:force_original_aspect_ratio=decrease:in_color_matrix=bt709:out_color_matrix=bt709:"
+                   f"in_range=tv:out_range=tv,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps},"
+                   f"tpad=stop_mode=clone:stop_duration=1,trim=end_frame={n_out}")
             tags = f"format=yuv420p,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv[v{k}]"
-            if c.get("cube_a"):
-                w = f"clip(({kept_off:.4f}+T)/{kept_total:.4f},0,1)"
+            if c.get("ramp") and d <= 60:
+                # keyframed grade: LUT at this piece's start and end (stats interpolated along the clip), crossfaded with xfade
+                # (measured on 300 frames of 1080p: blend with an expression 34.9 s, xfade 5.5 s, one LUT 3.9 s)
+                w0, w1 = kept_off / kept_total, (kept_off + (b - a)) / kept_total
+                ca, cb = str(tmp / f"c{c['clip']}_{k}_a.cube"), str(tmp / f"c{c['clip']}_{k}_b.cube")
+                C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], w0), qa["anchor"]["stats"], ca, strength=col["strength"])
+                C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], w1), qa["anchor"]["stats"], cb, strength=col["strength"])
                 fc += [vf + f",scale=in_color_matrix=bt709:in_range=tv:out_range=full,format=gbrp,split[sa{k}][sb{k}]",
-                       f"[sa{k}]lut3d=file='{c['cube_a']}':interp=tetrahedral[la{k}]",
-                       f"[sb{k}]lut3d=file='{c['cube_b']}':interp=tetrahedral[lb{k}]"]
-                vf = (f"[la{k}][lb{k}]blend=all_expr='A+(B-A)*{w}',"
+                       f"[sa{k}]lut3d=file='{ca}':interp=tetrahedral[la{k}]",
+                       f"[sb{k}]lut3d=file='{cb}':interp=tetrahedral[lb{k}]"]
+                vf = (f"[la{k}][lb{k}]xfade=transition=fade:duration={d:.4f}:offset=0,"
                       f"scale=in_range=full:out_color_matrix=bt709:out_range=tv,{tags}")
             else:
-                if c.get("cube"):
-                    vf += "," + C.LUT_CHAIN.format(cube=c["cube"])
+                cube = c.get("cube")
+                if c.get("ramp"):     # piece longer than xfade allows: one LUT from the stats at its middle
+                    cube = str(tmp / f"c{c['clip']}_{k}_m.cube")
+                    wm = (kept_off + (b - a) / 2) / kept_total
+                    C.write_cube(C.lerp_stats(c["ramp"]["a"], c["ramp"]["b"], wm), qa["anchor"]["stats"], cube, strength=col["strength"])
+                if cube:
+                    vf += "," + C.LUT_CHAIN.format(cube=cube)
                 vf += "," + tags
             kept_off += b - a
-            d = (f1 - f0) / fps
-            af = (f"[{ci}:a]aresample={sr},aformat=sample_rates={sr}:channel_layouts=stereo,apad,"
-                  f"atrim=start_sample={s0}:end_sample={s1},asetpts=PTS-STARTPTS")
+            if c.get("has_audio", True):
+                af = (f"[{ci}:a]aresample={sr},aformat=sample_rates={sr}:channel_layouts=stereo,apad,"
+                      f"atrim=start_sample={s0}:end_sample={s0 + round(d * sr)},asetpts=PTS-STARTPTS")
+            else:            # a clip without an audio stream gets silence of the exact length
+                af = f"anullsrc=r={sr}:cl=stereo,atrim=end_sample={round(d * sr)},asetpts=PTS-STARTPTS"
             if fade > 0 and d > 4 * fade:
                 af += f",afade=t=in:st=0:d={fade},afade=t=out:st={d - fade:.4f}:d={fade}"
             af += f"[a{k}]"
@@ -360,7 +408,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv", "-c:a", "pcm_s16le", str(assembled)]
     qa["ffmpeg_assemble"] = cmd
     edl = {"segments": [{"clip": c["clip"], "segments": c["segments"], "cuts": c["cuts"], "punch_in": c.get("punch_in"),
-                         "lut": bool(c.get("cube") or c.get("cube_a"))} for c in qa["clips"]]}  # frame-exact ranges are added to edit_qa.json (segments_frames)
+                         "lut": bool(c.get("cube") or c.get("ramp"))} for c in qa["clips"]]}  # frame-exact ranges are added to edit_qa.json (segments_frames)
     (out / "edl.json").write_text(json.dumps(edl, indent=1))
     if dry_run:
         qa["dry_run"] = True
@@ -383,10 +431,14 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     target_i, target_tp, tol = ed["audio"]["lufs"], ed["audio"]["true_peak"], ed["audio"]["lufs_tol"]
     final = out / "final.mp4"
     m0 = measure_loudness(str(assembled))
-    gain, limit_db = target_i - m0["I"], target_tp - 1.0
-    tries = []
     au = ed["audio"]
-    for _ in range(6):
+    max_gain = au["max_gain_db"]
+    gain, limit_db = min(max_gain, target_i - m0["I"]), target_tp - 1.0
+    tries = []
+    silent = m0["I"] < -60          # silence or near-silence: normalising would only lift noise (+1013 dB was seen)
+    if silent:
+        qa.setdefault("warnings", []).append(f"audio is near silent ({m0['I']} LUFS): loudness left as it is")
+    for _ in range(0 if silent else 6):
         # rumble cut, gain, delay-compensated peak limiter (alimiter without latency=1 shifted the audio 5 ms; caught by G13).
         # A fixed-threshold compressor before the limiter ate the gain (measured: -15.9 LUFS after 6 tries); not used.
         af = (f"highpass=f={au['highpass_hz']},volume={gain:.2f}dB,"
@@ -404,7 +456,24 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
         slope = 1.0
         if len(tries) >= 2 and tries[-1]["gain_db"] != tries[-2]["gain_db"]:
             slope = min(1.0, max(0.2, (tries[-1]["I"] - tries[-2]["I"]) / (tries[-1]["gain_db"] - tries[-2]["gain_db"])))
-        gain += (target_i - lm["I"]) / slope
+        gain = min(max_gain, gain + (target_i - lm["I"]) / slope)
+        if tries and len(tries) >= 2 and tries[-1]["gain_db"] == tries[-2]["gain_db"] == max_gain:
+            qa.setdefault("warnings", []).append(f"gain capped at +{max_gain} dB: the film stays below {target_i} LUFS")
+            break
+    if silent:
+        _run(["ffmpeg", "-v", "error", "-y", "-i", str(assembled), "-map", "0:v", "-map", "0:a", "-c:v", "copy",
+              "-c:a", "aac", "-b:a", f"{enc['audio_kbps']}k", "-movflags", "+faststart", str(final)])
+        tries = [{"gain_db": 0.0, "limit_db": None, **measure_loudness(str(final))}]
+    else:
+        # keep the best try, not the last: inside the peak limit first, then closest to the target
+        best = min(range(len(tries)), key=lambda j: (tries[j]["TP"] > target_tp + 0.05, abs(tries[j]["I"] - target_i)))
+        if best != len(tries) - 1:
+            t = tries[best]
+            af = (f"highpass=f={au['highpass_hz']},volume={t['gain_db']:.2f}dB,"
+                  f"alimiter=limit={10 ** (t['limit_db'] / 20):.4f}:attack=5:release=50:level=false:latency=1,aresample=48000")
+            _run(["ffmpeg", "-v", "error", "-y", "-i", str(assembled), "-map", "0:v", "-map", "0:a", "-c:v", "copy", "-af", af,
+                  "-c:a", "aac", "-b:a", f"{enc['audio_kbps']}k", "-movflags", "+faststart", str(final)])
+            tries.append({**t, **measure_loudness(str(final)), "kept": "best earlier try"})
     reduction = round(tries[-1]["gain_db"] - (tries[-1]["I"] - m0["I"]), 1)   # loudness lost to compression and limiting
     if reduction > au["max_reduction_db"]:
         qa.setdefault("warnings", []).append(f"dynamics took {reduction} dB of loudness (> {au['max_reduction_db']}): listen for pumping")
@@ -415,7 +484,7 @@ def edit(clips_dir: str | Path, plan: dict | None, prof: dict, out_dir: str | Pa
     qa["final"] = {"path": str(final), **fin}
     t, pos = 0.0, []
     for c in qa["clips"]:
-        d = sum(f1 - f0 for f0, f1 in c["segments_frames"]) / fps
+        d = sum(n for _, _, n in c["segments_frames"]) / fps
         pos.append((t, t + d))
         t += d
     qa["av"] = av_check(qa, str(final), fps)

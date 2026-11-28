@@ -69,7 +69,7 @@ editor:
     max_shot_s: 30
     punch_in_scale: 1.12
   color: {method: reinhard_lab, mode: ramp, ramp_s: 1.0, anchor_clip: 1, strength: 1.0, sample_step: 4, skip_below_dE: 0.5}   # R-CO1; ramp = keyframed start/end grade
-  audio: {lufs: -14, lufs_tol: 1.0, true_peak: -2.0, lra: 11, highpass_hz: 70, max_reduction_db: 8}   # R-AU1, R-AU2
+  audio: {lufs: -14, lufs_tol: 1.0, true_peak: -2.0, lra: 11, highpass_hz: 70, max_reduction_db: 8, max_gain_db: 40}   # R-AU1, R-AU2
   titles: {lower_third: false, start_s: 2.0, hold_s: 4.0, captions: false}
   review: {contact_sheet: [7, 6], thumb_width: 320}
   sync: {max_offset_ms: 10}   # per-segment audio vs picture after the join; audio lead is detectable from about 45 ms (R-ED6)

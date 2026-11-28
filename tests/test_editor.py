@@ -103,3 +103,55 @@ def test_wer_from_word_file_feeds_editor(tmp_path):
     r = json.loads((tmp_path / "clip1.wer.json").read_text())
     assert r["win_wer"] == [0.0] and len(r["words"]) == 4
     assert ED.find_clips(tmp_path, wer_dir=tmp_path) == []   # no video here; the lookup itself must not fail
+
+
+def _clip2(path, colour="0x806050", size="320x180", fps=24, audio="noise", seed=1, d=3):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s={size}:r={fps}:d={d}"]
+    if audio == "noise":
+        cmd += ["-f", "lavfi", "-i", f"anoisesrc=d={d}:c=pink:a=0.3:r=48000:seed={seed}", "-shortest"]
+    elif audio == "silent":
+        cmd += ["-f", "lavfi", "-i", f"anullsrc=r=48000:cl=stereo:d={d}", "-shortest"]
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p"] + (["-c:a", "aac"] if audio != "none" else []) + [str(path)]
+    subprocess.run(cmd, check=True)
+
+
+@pytest.mark.skipif(not HAS_FF, reason="needs ffmpeg")
+def test_mixed_rates_shapes_and_missing_audio(tmp_path):
+    _clip2(tmp_path / "clip1" / "video.mp4", fps=24, seed=1)
+    _clip2(tmp_path / "clip2" / "video.mp4", fps=30, seed=2, colour="0x5a4030")
+    _clip2(tmp_path / "clip3" / "video.mp4", size="180x320", seed=3)
+    _clip2(tmp_path / "clip4" / "video.mp4", audio="none", colour="0x907060")
+    qa = ED.edit(tmp_path, None, TH, tmp_path / "o", require_wer=False)
+    w = " ".join(qa.get("warnings", []))
+    assert "30.000 fps" in w and "letterboxed" in w
+    assert qa["av"]["stream_gap_s"] <= 1 / 24 + 0.03, qa["av"]
+    assert all(r["offset_ms"] is None or abs(r["offset_ms"]) <= 10 for r in qa["av"]["segments"]), qa["av"]
+    assert abs(qa["final"]["duration"] - 12.0) < 0.1
+
+
+@pytest.mark.skipif(not HAS_FF, reason="needs ffmpeg")
+def test_silent_film_is_not_amplified(tmp_path):
+    _clip2(tmp_path / "clip1" / "video.mp4", audio="silent")
+    qa = ED.edit(tmp_path, None, TH, tmp_path / "o", require_wer=False)
+    assert any("near silent" in x for x in qa["warnings"]) and qa["loudness"]["tries"][-1]["gain_db"] == 0.0
+
+
+def test_clip_with_only_flawed_words_is_left_out():
+    heard = _w("and that is how it works")
+    f = ED.find_flaws(heard, "", earlier=[x["w"] for x in heard])
+    cl = ED.cut_list(heard, 3.0, f, TH)
+    assert cl["segments"] == []
+
+
+def test_shared_phrase_with_previous_script_is_kept():
+    prev = [x["w"] for x in _w("this is the end of the first part")]
+    f = ED.find_flaws(_w("at the end of the day we ship it"), "at the end of the day we ship it", earlier=prev,
+                      earlier_ref="this is the end of the first part")
+    assert f == []
+
+
+def test_out_point_follows_the_last_kept_word():
+    heard = _w("we ship it today um")
+    cl = ED.cut_list(heard, 5.0, ED.find_flaws(heard, "we ship it today"), TH)
+    assert len(cl["segments"]) == 1 and cl["out"] == pytest.approx(heard[3]["t1"] + 0.25)

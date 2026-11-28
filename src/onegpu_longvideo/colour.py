@@ -75,6 +75,11 @@ def lab_stats(frames: list[np.ndarray]) -> dict:
     return {"mean": [round(float(v), 3) for v in x.mean(0)], "std": [round(float(v), 3) for v in x.std(0)]}
 
 
+def lerp_stats(a: dict, b: dict, w: float) -> dict:
+    """Stats between two keyframes (w = 0 -> a, 1 -> b)."""
+    return {k: [x + w * (y - x) for x, y in zip(a[k], b[k])] for k in ("mean", "std")}
+
+
 def de76(a: dict, b: dict) -> float:
     return round(float(np.linalg.norm(np.array(a["mean"]) - np.array(b["mean"]))), 2)
 
