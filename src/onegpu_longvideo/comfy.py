@@ -8,6 +8,7 @@ import json
 import os
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -31,7 +32,11 @@ class ComfyClient:
         return json.loads(raw) if raw else {}
 
     def queue(self, graph: dict) -> str:
-        r = self._req("/prompt", {"prompt": graph, "client_id": self.client_id})
+        try:
+            r = self._req("/prompt", {"prompt": graph, "client_id": self.client_id})
+        except urllib.error.HTTPError as e:  # ComfyUI answers 400 with the reason (missing node class, file not in list...)
+            body = e.read().decode("utf-8", "replace")[:1500]
+            raise RuntimeError(f"ComfyUI rejected the graph (HTTP {e.code}): {body}") from e
         if r.get("node_errors"):
             raise RuntimeError(f"ComfyUI rejected the graph: {json.dumps(r['node_errors'])[:800]}")
         return r["prompt_id"]

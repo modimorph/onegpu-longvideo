@@ -38,8 +38,8 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="convert only the first N modules (smoke test; no file written)")
     a = ap.parse_args()
     import os
-    if os.path.abspath(a.src) == os.path.abspath(a.dst):
-        raise SystemExit("DST must differ from SRC")
+    if os.path.abspath(a.src) == os.path.abspath(a.dst) or (os.path.exists(a.dst) and os.path.samefile(a.src, a.dst)):
+        raise SystemExit("DST must differ from SRC (also via links)")
     dev = a.device
     out, errs, t0 = {}, [], time.perf_counter()
     with safe_open(a.src, "pt", device="cpu") as f:

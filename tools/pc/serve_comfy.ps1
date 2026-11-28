@@ -13,4 +13,4 @@ foreach ($i in 1..180) {
   if ($p.HasExited) { "comfy exited early (code $($p.ExitCode)); see $log.err.log"; exit 1 }
   try { Invoke-RestMethod -TimeoutSec 2 "http://127.0.0.1:$Port/system_stats" | Out-Null; "comfy up on $Port after $i s (flags: $Extra $flags)"; exit 0 } catch { Start-Sleep 1 }
 }
-"comfy did not come up on $Port"; exit 1
+Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; "comfy did not come up on $Port (stopped it)"; exit 1

@@ -24,6 +24,8 @@ def test_run_without_raw_dest_skips_raw(tmp_path, monkeypatch):
     c = ComfyClient("http://x")
     monkeypatch.setattr(c, "queue", lambda g: "pid")
     monkeypatch.setattr(c, "wait", lambda pid, t: h)
-    monkeypatch.setattr(c, "download", lambda item, dest: dest)
+    calls = []
+    monkeypatch.setattr(c, "download", lambda item, dest: (calls.append((item["filename"], str(dest))), dest)[1])
     res = c.run({}, tmp_path / "a.mp4")
     assert "raw_file" not in res and res["remote_file"] == "a.mp4"
+    assert calls == [("a.mp4", str(tmp_path / "a.mp4"))]

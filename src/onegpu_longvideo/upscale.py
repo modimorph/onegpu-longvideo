@@ -112,8 +112,12 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
     cudnn_prev = torch.backends.cudnn.benchmark
     if o["cudnn_bench"]:
         torch.backends.cudnn.benchmark = True
-    if model is None:
-        model = load_model(model_path, o["ts_cache"])
+    try:
+        if model is None:
+            model = load_model(model_path, o["ts_cache"])
+    except Exception:
+        torch.backends.cudnn.benchmark = cudnn_prev
+        raise
     if o["channels_last"]:
         model = model.to(memory_format=torch.channels_last)
     post = None
@@ -140,6 +144,8 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
                 pass
         return False
 
+    rerr: list = []
+
     def reader():
         try:
             while True:
@@ -153,6 +159,8 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
                     return
                 if len(buf) < batch:
                     return
+        except Exception as e:  # noqa: BLE001  (surfaced after teardown, so it never looks like a clean EOF)
+            rerr.append(e)
         finally:
             put_in(None)  # also on a reader exception, so the GPU loop never waits forever
 
@@ -168,11 +176,11 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
                 if isinstance(x, tuple):  # (event, pinned tensor, n, slot release): wait for its async D2H copy
                     ev, pin, k, release = x
                     try:
+                        ev.synchronize()  # also on the error path: the slot may be reused only after its copy finished
                         if not werr:
-                            ev.synchronize()
                             a = pin[:k].numpy()
                             if tap is not None:
-                                tap(a)
+                                tap(a.copy())  # the pinned slot is reused by a later batch
                             enc.stdin.write(a.tobytes())
                     finally:
                         release.put(pin)
@@ -252,12 +260,17 @@ def upscale(inp: str, out: str, model_path: str, width: int, height: int, batch:
         qout.put(None)
         wt.join()
         enc.wait()
-        if dec.poll() is None:
+        dec_killed = dec.poll() is None
+        if dec_killed:
             dec.kill()
         dec.wait()
         torch.backends.cudnn.benchmark = cudnn_prev
     if werr:
         raise RuntimeError(f"upscale writer failed: {werr[0]!r}") from werr[0]
+    if rerr:
+        raise RuntimeError(f"upscale reader failed: {rerr[0]!r}") from rerr[0]
+    if dec.returncode and not dec_killed:
+        raise RuntimeError(f"upscale decoder exited with code {dec.returncode}: input {inp} was not fully read")
     if enc.returncode:
         raise RuntimeError(f"upscale encoder exited with code {enc.returncode}: output {out} is not valid")
     t2 = time.perf_counter()

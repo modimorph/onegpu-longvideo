@@ -7,5 +7,7 @@ $env:CUDA_PATH = "$Lib\triton\backends\nvidia"
 nvidia-smi --query-gpu=temperature.gpu,power.draw,clocks.sm,clocks.mem,utilization.gpu,memory.used --format=csv,noheader
 $t0 = Get-Date
 & $Py "$Repo\tools\bench_frame_io.py" 2>&1
-Write-Output "exit=$LASTEXITCODE wall_s=$(((Get-Date)-$t0).TotalSeconds)"
+$rc = $LASTEXITCODE
+Write-Output "exit=$rc wall_s=$(((Get-Date)-$t0).TotalSeconds)"
 nvidia-smi --query-gpu=temperature.gpu,power.draw,clocks.sm,clocks.mem,utilization.gpu,memory.used --format=csv,noheader
+exit $rc
