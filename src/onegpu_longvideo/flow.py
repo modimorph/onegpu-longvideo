@@ -4,6 +4,7 @@ The folder holds `flow_run.json` (a manifest you fill; see docs/FLOW-CHECKLIST.m
 Human gates (listening check, vision review, contact sheet) are read from the manifest; this code cannot judge them, it only refuses a missing "yes".
 Planner and editor (docs/PLANNER.md, docs/EDITOR.md) wrap the flow: steps 1-2 need a passing `plan.json` (`olv plan`),
 steps 9, 11 and 12 a passing `edit_qa.json` (`olv edit`). Set `seconds` in the manifest for clips other than 29.96 s.
+`"film": true` checks a film of several clips: last word and per-window WER per clip come from plan.json and edit_qa.json.
 """
 from __future__ import annotations
 
@@ -38,19 +39,32 @@ def check(run_dir: str | Path) -> list[dict]:
     lw = json.loads(wp.read_text()).get("last_word_s") if wp.exists() else None
     pp = d / m.get("plan", "plan.json")
     pl = json.loads(pp.read_text()) if pp.exists() else {}
+    ep = d / m.get("edit_qa", "edit_qa.json")
+    eq = json.loads(ep.read_text()) if ep.exists() else {}
+    film = bool(m.get("film"))       # a film of several clips: per-clip numbers come from plan.json and edit_qa.json
     add(1, "planner gates passed (plan.json)", pl.get("gates_pass") is True,
         "missing plan.json (run olv plan)" if not pl else ", ".join(g["id"] for g in pl.get("gates", []) if not g["pass"]) or "all pass")
-    add(1, f"last word by {last_word} s", lw is not None and lw <= last_word, f"last_word_s={lw}")
+    if film:
+        secs_of = {c["clip"]: c["seconds"] for c in pl.get("clips", [])}
+        wc = (eq.get("word_check") or {}).get("clips", [])
+        late = [f"clip {c['clip']}: {c.get('last_word_s')} s" for c in wc
+                if c.get("checked") and (c.get("last_word_s") is None or c["last_word_s"] > secs_of.get(c["clip"], secs) - END_MARGIN_S)]
+        add(1, "every clip: last word by S - 1.66 s", bool(wc) and not late, "; ".join(late) or f"{len(wc)} clips")
+    else:
+        add(1, f"last word by {last_word} s", lw is not None and lw <= last_word, f"last_word_s={lw}")
     add(5, f"{frames} frames", raw.get("frames") == frames, f"frames={raw.get('frames')}")
     add(5, "raw 1280x720", (raw.get("width"), raw.get("height")) == GATES["raw_size"], f"{raw.get('width')}x{raw.get('height')}")
     add(5, "render time logged", isinstance(m.get("render_s"), (int, float)), f"render_s={m.get('render_s')}")
-    ok, note = _wer_ok(wp)
-    add(6, "0 % WER in every 5 s window (raw take)", ok, note)
+    if film:
+        wc = (eq.get("word_check") or {}).get("clips", [])
+        bad = [f"clip {c['clip']}: {c.get('win_wer')}" for c in wc if not c.get("checked") or any(x > 0 for x in (c.get("win_wer") or [1]))]
+        add(6, "every clip: 0 % WER in every 5 s window", bool(wc) and not bad, "; ".join(bad) or f"{len(wc)} clips")
+    else:
+        ok, note = _wer_ok(wp)
+        add(6, "0 % WER in every 5 s window (raw take)", ok, note)
     add(7, "QA stage 1 passed; flagged parts reviewed", qa.get("stage1_pass") is True and qa.get("flagged_reviewed") is True)
     add(8, "final 1920x1080", (fin.get("width"), fin.get("height")) == GATES["final_size"], f"{fin.get('width')}x{fin.get('height')}")
     add(9, "repeated closing lines cut", m.get("edit", {}).get("repeats_cut") is True)
-    ep = d / m.get("edit_qa", "edit_qa.json")
-    eq = json.loads(ep.read_text()) if ep.exists() else {}
     add(9, "editor gates passed (edit_qa.json)", eq.get("gates_pass") is True,
         "missing edit_qa.json (run olv edit)" if not eq else ", ".join(g["id"] for g in eq.get("gates", []) if not g["pass"]) or "all pass")
     if voice.get("used"):
@@ -60,8 +74,9 @@ def check(run_dir: str | Path) -> list[dict]:
     add(11, "colour grade applied", m.get("grade") is True)
     enc_ok = fin.get("vcodec") == "h264" and fin.get("crf") == GATES["crf"] and fin.get("acodec") == "aac" and fin.get("audio_kbps") == GATES["audio_kbps"]
     add(11, "encode h264 CRF 18, AAC 192k", enc_ok, f"{fin.get('vcodec')} crf={fin.get('crf')} {fin.get('acodec')} {fin.get('audio_kbps')}k")
-    ok, note = _wer_ok(d / m.get("wer_final", "wer_final.json"))
-    add(12, "final: 0 % WER in every window", ok, note)
+    if not film or (d / m.get("wer_final", "wer_final.json")).exists():
+        ok, note = _wer_ok(d / m.get("wer_final", "wer_final.json"))
+        add(12, "final: 0 % WER in every window", ok, note)
     add(12, "final: voice match checked", isinstance(qa.get("speaker_match"), (int, float)), f"speaker_match={qa.get('speaker_match')}")
     add(12, "final: lip sync ok", qa.get("lip_sync_ok") is True)
     add(12, "contact sheet reviewed by a person", qa.get("contact_sheet_reviewed") is True)

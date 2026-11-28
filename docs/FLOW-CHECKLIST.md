@@ -32,4 +32,4 @@ Gates are in [FLOW.md](FLOW.md). Tick a box only after its gate passes.
 }
 ```
 
-`wer_raw.json` and `wer_final.json` are the output of `olv wer <wav> <lines.txt> --out <file>`. Set `"voice": {"used": false}` when you keep the model voice.
+`wer_raw.json` and `wer_final.json` are the output of `olv wer <wav> <lines.txt> --out <file>`. Set `"voice": {"used": false}` when you keep the model voice. For a film of several clips add `"film": true`: last word and per-window WER are then read per clip from `plan.json` and `edit_qa.json`, and `wer_raw.json` / `wer_final.json` are optional.

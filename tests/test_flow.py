@@ -87,3 +87,18 @@ def test_short_clip_gates_follow_seconds(tmp_path):
     rows = flow.check(_run(tmp_path, m, wer={"win_wer": [0, 0], "last_word_s": 8.2}))
     assert flow.passed(rows), _fails(rows)
     assert "last word by 8.34 s" in _fails(flow.check(_run(tmp_path, m, wer={"win_wer": [0, 0], "last_word_s": 9.0})))
+
+
+
+def test_film_mode_reads_every_clip_from_edit_qa(tmp_path):
+    m = {**GOOD, "film": True, "seconds": 10, "raw": {"width": 1280, "height": 720, "frames": 243}}
+    _run(tmp_path, m)
+    (tmp_path / "wer_final.json").unlink()
+    (tmp_path / "plan.json").write_text(json.dumps({"gates_pass": True, "gates": [], "clips": [{"clip": 1, "seconds": 10}, {"clip": 2, "seconds": 10}]}))
+    wc = [{"clip": 1, "checked": True, "win_wer": [0, 0], "last_word_s": 8.1}, {"clip": 2, "checked": True, "win_wer": [0, 0.07], "last_word_s": 9.8}]
+    (tmp_path / "edit_qa.json").write_text(json.dumps({"gates_pass": True, "gates": [], "word_check": {"clips": wc}}))
+    f = _fails(flow.check(tmp_path))
+    assert f == {"every clip: last word by S - 1.66 s", "every clip: 0 % WER in every 5 s window"}
+    wc[1].update(win_wer=[0, 0], last_word_s=8.2)
+    (tmp_path / "edit_qa.json").write_text(json.dumps({"gates_pass": True, "gates": [], "word_check": {"clips": wc}}))
+    assert flow.passed(flow.check(tmp_path))
